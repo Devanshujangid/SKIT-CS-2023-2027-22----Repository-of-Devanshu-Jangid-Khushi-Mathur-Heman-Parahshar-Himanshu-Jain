@@ -1,6 +1,25 @@
-.env
-.env.*
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python / Backend
 venv/
 __pycache__/
-*.pyc
-node_modules/ 
+*.py[cod]
+*$py.class
+
+# Environment & Secret variables
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Logs & OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

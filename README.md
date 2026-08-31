@@ -1,19 +1,36 @@
-# 🎓 Smart Learning Planner
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-**Smart Learning Planner** is a centralized, AI-powered personalized learning and academic planning web application. 
+## Getting Started
 
-Unlike traditional to-do lists, this platform uses continuous learning loops—analyzing student academic data, study behavior, weak topics, and deadlines—to dynamically adjust schedules and recommend highly personalized study resources. 
+First, run the development server:
 
-### 🚀 Core Features
-*   **Adaptive Timetables:** Automatically adjusts future schedules when tasks are missed or performance changes.
-*   **Weak Topic Detection:** Evaluates quiz scores and study consistency to identify and prioritize weak areas.
-*   **Context-Aware AI Assistant:** Powered by the Gemini API, the assistant answers questions and generates revision plans based strictly on the student's personal learning data.
-*   **Voice Integration:** Allows students to interact with the AI assistant seamlessly via speech-to-text.
-*   **Learning Analytics:** Provides real-time dashboards tracking subject-wise progress, study streaks, and completion rates.
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
 
-### 🛠️ Technology Stack
-*   **Frontend:** Next.js, React.js, Tailwind CSS
-*   **Backend:** Node.js, Express.js
-*   **Database:** Supabase (PostgreSQL)
-*   **Authentication:** Clerk
-*   **AI Service:** Python, FastAPI, Google Gemini API
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
