@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from auth import verify_clerk_token
+from routes.ai import router as ai_router
 
 app = FastAPI(title="Smart Learning Planner API")
 
@@ -11,6 +12,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(ai_router)
 
 @app.get("/api/health")
 def health_check():
