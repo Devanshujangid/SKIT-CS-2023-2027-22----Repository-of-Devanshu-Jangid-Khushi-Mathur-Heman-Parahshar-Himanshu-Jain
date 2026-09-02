@@ -5,6 +5,7 @@ from typing import List
 
 from auth import verify_clerk_token
 from database import get_db
+from routes.ai import router as ai_router
 
 app = FastAPI(title="Smart Learning Planner API")
 
@@ -17,6 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include AI Router
+app.include_router(ai_router)
+
+
 # Request Payload Schema
 class ProfileCreateRequest(BaseModel):
     email: EmailStr
@@ -24,9 +29,16 @@ class ProfileCreateRequest(BaseModel):
     study_hours_per_day: float
     goals: List[str]
 
+
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "Smart Learning Planner Backend"}
+
+
+@app.get("/api/v1/protected-route")
+def protected_route(user: dict = Depends(verify_clerk_token)):
+    return {"message": "Access granted", "clerk_id": user.get("sub")}
+
 
 @app.post("/api/v1/profile", status_code=status.HTTP_201_CREATED)
 async def create_or_update_profile(
@@ -76,6 +88,7 @@ async def create_or_update_profile(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Database error: {str(e)}"
         )
+
 
 if __name__ == "__main__":
     import uvicorn

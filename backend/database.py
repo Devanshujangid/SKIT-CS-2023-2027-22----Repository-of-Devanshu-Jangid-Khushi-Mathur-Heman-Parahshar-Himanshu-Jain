@@ -18,7 +18,7 @@ if SUPABASE_URL.startswith("http://") or SUPABASE_URL.startswith("https://"):
 else:
     print("Warning: SUPABASE_URL is not configured with a valid HTTP/HTTPS URL. Running without active DB connection.")
 
-def get_db():
+def get_db() -> Client:
     if not supabase:
         raise RuntimeError("Database connection not initialized. Please configure SUPABASE_URL in .env")
     return supabase
