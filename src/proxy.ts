@@ -1,3 +1,4 @@
+
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
 // Define public routes that do not require authentication
