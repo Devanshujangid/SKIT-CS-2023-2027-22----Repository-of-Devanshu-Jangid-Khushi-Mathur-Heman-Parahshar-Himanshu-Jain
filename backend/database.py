@@ -5,14 +5,14 @@ from supabase import create_client, Client
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Check if a valid URL is provided; otherwise create a dummy/mock placeholder
 supabase: Client = None
 
 if SUPABASE_URL.startswith("http://") or SUPABASE_URL.startswith("https://"):
     try:
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     except Exception as e:
         print(f"Warning: Could not initialize Supabase client: {e}")
 else:

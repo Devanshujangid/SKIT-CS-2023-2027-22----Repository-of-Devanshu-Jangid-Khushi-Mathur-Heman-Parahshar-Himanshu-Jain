@@ -27,7 +27,7 @@ def get_gemini_model(model_name: str = None) -> genai.GenerativeModel:
     genai.configure(api_key=gemini_api_key)
 
     # Allow configuration via env, default to gemini-1.5-flash
-    target_model = model_name or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    target_model = model_name or os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     return genai.GenerativeModel(
         model_name=target_model,
@@ -53,7 +53,7 @@ async def test_gemini(request: AITestRequest):
 
     try:
         genai.configure(api_key=gemini_api_key)
-        target_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        target_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         model = genai.GenerativeModel(target_model)
         response = model.generate_content(request.prompt)
 
