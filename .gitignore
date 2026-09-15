@@ -24,3 +24,6 @@ backend/.env
 npm-debug.log*
 .DS_Store
 Thumbs.db
+.agents/
+skills-lock.json
+
