@@ -1,163 +1,236 @@
-import os
+# backend/routes/ai.py
+
 import json
-import asyncio
-import google.generativeai as genai
+import logging
+import os
+import time
+from typing import Any, Dict
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from prompts.study_plan import (
-    OnboardingDataInput,
-    STUDY_PLAN_SYSTEM_INSTRUCTION,
-    build_study_plan_prompt,
-)
+from google import genai
+from google.genai import types
+
+from prompts.study_plan import OnboardingDataInput
+
 
 load_dotenv()
 
 router = APIRouter(prefix="/api/v1/ai", tags=["AI"])
 
+logger = logging.getLogger(__name__)
 
-def get_gemini_model(model_name: str = None) -> genai.GenerativeModel:
-    """
-    Initializes and returns the configured Gemini model.
-    """
 
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
+# -----------------------------
+# Request Models
+# -----------------------------
 
-    if not gemini_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Missing GEMINI_API_KEY in environment configuration."
-        )
+class TestPromptRequest(BaseModel):
+    prompt: str
 
-    genai.configure(api_key=gemini_api_key)
 
-    target_model = model_name or os.getenv(
+class GeneratePlanRequest(BaseModel):
+    onboarding_data: OnboardingDataInput
+
+
+# -----------------------------
+# Gemini Configuration
+# -----------------------------
+
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is missing in .env")
+
+    return genai.Client(api_key=api_key)
+
+
+def get_target_model() -> str:
+    return os.getenv(
         "GEMINI_MODEL",
         "gemini-3.6-flash"
     )
 
-    return genai.GenerativeModel(
-        model_name=target_model,
-        system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
-    )
 
+# -----------------------------
+# Helper: Generate Gemini Text
+# -----------------------------
 
-class AITestRequest(BaseModel):
-    prompt: str = "Hello, respond with a short connectivity test message."
-
-
-@router.post("/test")
-async def test_gemini(request: AITestRequest):
-    """
-    Endpoint to verify Gemini API connectivity.
-    """
-
-    try:
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
-
-        if not gemini_api_key:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Missing GEMINI_API_KEY in environment configuration."
-            )
-
-        genai.configure(api_key=gemini_api_key)
-
-        target_model = os.getenv(
-            "GEMINI_MODEL",
-            "gemini-3.6-flash"
-        )
-
-        model = genai.GenerativeModel(target_model)
-
-        response = await asyncio.to_thread(
-            model.generate_content,
-            request.prompt
-        )
-
-        return {
-            "success": True,
-            "model_used": target_model,
-            "response": response.text
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Gemini API error: {str(e)}"
-        )
-
-
-@router.post("/generate-plan")
-async def generate_study_plan(payload: OnboardingDataInput):
-    """
-    Generates a structured 7-day personalized study plan.
-
-    Includes:
-    - Gemini AI integration
-    - Retry mechanism
-    - JSON MIME type enforcement
-    - JSON parsing and validation
-    """
-
-    max_retries = 3
-    retry_delay = 2
-
-    model = get_gemini_model()
-    user_prompt = build_study_plan_prompt(payload)
+def generate_gemini_response(prompt: str) -> str:
+    client = get_gemini_client()
+    model = get_target_model()
 
     last_error = None
 
-    for attempt in range(max_retries):
+    for attempt in range(3):
         try:
-
-            response = await asyncio.to_thread(
-                model.generate_content,
-                user_prompt,
-                generation_config={
-                    "response_mime_type": "application/json"
-                }
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
             )
 
-            raw_text = response.text.strip()
+            if not response.text:
+                raise RuntimeError("Gemini returned an empty response")
 
-            if not raw_text:
-                raise ValueError("Gemini returned an empty response.")
+            return response.text
 
-            # Remove accidental markdown wrappers
-            if raw_text.startswith("```json"):
-                raw_text = raw_text[7:]
+        except Exception as exc:
+            last_error = exc
+            logger.exception(
+                "Gemini request failed on attempt %s/3",
+                attempt + 1
+            )
 
-            elif raw_text.startswith("```"):
-                raw_text = raw_text[3:]
+            if attempt < 2:
+                time.sleep(2)
 
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
+    raise RuntimeError(f"Gemini API error: {last_error}")
 
-            parsed_json = json.loads(raw_text.strip())
 
-            return {
-                "success": True,
-                "plan": parsed_json,
-                "model_used": os.getenv(
-                    "GEMINI_MODEL",
-                    "gemini-3.6-flash"
-                )
-            }
+# -----------------------------
+# Helper: Extract JSON
+# -----------------------------
 
-        except json.JSONDecodeError as e:
-            last_error = f"Invalid JSON response from Gemini: {str(e)}"
+def extract_json(text: str) -> Dict[str, Any]:
+    cleaned = text.strip()
 
-        except Exception as e:
-            last_error = str(e)
+    # Remove Markdown code fences if Gemini returns them
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```json", "", 1)
+        cleaned = cleaned.replace("```", "", 1)
+        cleaned = cleaned.strip()
 
-        # Retry only if attempts remain
-        if attempt < max_retries - 1:
-            await asyncio.sleep(retry_delay * (attempt + 1))
+    try:
+        parsed = json.loads(cleaned)
 
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=f"Study plan generation failed after {max_retries} attempts: {last_error}"
-    )
+        if not isinstance(parsed, dict):
+            raise ValueError("Expected a JSON object")
+
+        return parsed
+
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+
+        if start == -1 or end == -1:
+            raise ValueError("Gemini response did not contain valid JSON")
+
+        try:
+            parsed = json.loads(cleaned[start:end + 1])
+
+            if not isinstance(parsed, dict):
+                raise ValueError("Expected a JSON object")
+
+            return parsed
+
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Could not parse Gemini JSON response: {exc}"
+            ) from exc
+
+
+# -----------------------------
+# Test Endpoint
+# -----------------------------
+
+@router.post("/test")
+async def test_ai(request: TestPromptRequest):
+    try:
+        response_text = generate_gemini_response(request.prompt)
+
+        return {
+            "success": True,
+            "model": get_target_model(),
+            "response": response_text,
+        }
+
+    except Exception as exc:
+        logger.exception("AI test endpoint failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
+
+
+# -----------------------------
+# Generate Study Plan Endpoint
+# -----------------------------
+
+@router.post("/generate-plan")
+async def generate_study_plan(request: GeneratePlanRequest):
+    try:
+        onboarding_data = request.onboarding_data
+
+        prompt = f"""
+You are an AI study planner for a B.Tech Computer Science student.
+
+Create a personalized 7-day study plan using the student's onboarding data.
+
+Student data:
+{onboarding_data.model_dump_json(indent=2)}
+
+Requirements:
+1. Respect the student's available study hours per day.
+2. Prioritize difficult subjects.
+3. Include revision and practice sessions.
+4. Include GATE-style preparation where appropriate.
+5. Avoid unrealistic workloads.
+6. Return ONLY valid JSON.
+7. Do not include Markdown code fences.
+
+Use this JSON structure:
+
+{{
+  "plan_title": "string",
+  "weekly_goal": "string",
+  "days": [
+    {{
+      "day": "Day 1",
+      "date": "string",
+      "tasks": [
+        {{
+          "subject": "string",
+          "topic": "string",
+          "activity": "string",
+          "duration_minutes": 60,
+          "priority": "high"
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+        client = get_gemini_client()
+        model = get_target_model()
+
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+
+        if not response.text:
+            raise RuntimeError("Gemini returned an empty study plan")
+
+        plan = extract_json(response.text)
+
+        return {
+            "success": True,
+            "model": model,
+            "plan": plan,
+        }
+
+    except Exception as exc:
+        logger.exception("Study plan generation failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )

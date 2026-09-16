@@ -1,4 +1,5 @@
 -- Create users table
+
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_id TEXT UNIQUE NOT NULL,
@@ -8,9 +9,10 @@ CREATE TABLE users (
 );
 
 -- Create student_profiles table
+
 CREATE TABLE student_profiles (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE NOT NULL,
     semester INT NOT NULL,
     study_hours_per_day FLOAT NOT NULL,
     goals TEXT[] NOT NULL,
