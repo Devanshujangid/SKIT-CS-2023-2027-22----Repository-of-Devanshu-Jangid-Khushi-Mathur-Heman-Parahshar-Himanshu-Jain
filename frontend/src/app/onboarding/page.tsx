@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { API_BASE_URL } from "@/lib/api";
 
 export default function OnboardingPage() {
   const { getToken } = useAuth();
@@ -34,7 +35,7 @@ export default function OnboardingPage() {
         subjects: formData.subjects.split(",").map((s) => s.trim()).filter(Boolean),
       };
 
-      const response = await fetch("http://localhost:8000/api/v1/profile", {
+      const response = await fetch(`${API_BASE_URL}/api/v1/profile`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
