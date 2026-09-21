@@ -35,7 +35,7 @@ def get_gemini_model(model_name: str = None) -> genai.GenerativeModel:
 
     target_model = model_name or os.getenv(
         "GEMINI_MODEL",
-        "gemini-3.6-flash"
+        "gemini-2.5-flash"
     )
 
     return genai.GenerativeModel(
