@@ -4,7 +4,7 @@ based on student onboarding data (goals, hours, semester, subjects).
 """
 import json
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SubjectInput(BaseModel):
@@ -18,6 +18,19 @@ class OnboardingDataInput(BaseModel):
     study_hours_per_day: float = Field(..., description="Daily available study hours")
     goals: List[str] = Field(..., description="List of academic/career goals")
     subjects: List[SubjectInput] = Field(..., description="List of enrolled subjects")
+
+    @field_validator("subjects", mode="before")
+    @classmethod
+    def normalize_subjects(cls, value):
+        if isinstance(value, list):
+            return [
+                {"name": subject, "difficulty": "medium"}
+                if isinstance(subject, str)
+                else subject
+                for subject in value
+            ]
+        return value
+
 
 
 STUDY_PLAN_SYSTEM_INSTRUCTION = """

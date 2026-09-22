@@ -22,3 +22,38 @@ def get_db() -> Client:
     if not supabase:
         raise RuntimeError("Database connection not initialized. Please configure SUPABASE_URL in .env")
     return supabase
+
+
+def save_study_plan(clerk_id: str, plan_data: dict) -> dict:
+    """
+    Save a generated study plan for the authenticated Clerk user.
+    """
+    db = get_db()
+
+    # Find the internal Supabase user ID using Clerk ID
+    user_res = (
+        db.table("users")
+        .select("id")
+        .eq("clerk_id", clerk_id)
+        .execute()
+    )
+
+    if not user_res.data:
+        raise RuntimeError("User not found for the provided Clerk ID")
+
+    user_id = user_res.data[0]["id"]
+
+    # Save the generated study plan against that user
+    plan_res = (
+        db.table("study_plans")
+        .insert({
+            "user_id": user_id,
+            "plan_data": plan_data
+        })
+        .execute()
+    )
+
+    if not plan_res.data:
+        raise RuntimeError("Study plan could not be saved")
+
+    return plan_res.data[0]
