@@ -7,13 +7,15 @@ import time
 from typing import Any, Dict
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from google import genai
 from google.genai import types
 
 from prompts.study_plan import OnboardingDataInput
+from auth import verify_clerk_token
+from database import save_study_plan
 
 
 load_dotenv()
@@ -70,6 +72,9 @@ def generate_gemini_response(prompt: str) -> str:
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
+                config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+              )
             )
 
             if not response.text:
@@ -161,7 +166,10 @@ async def test_ai(request: TestPromptRequest):
 # -----------------------------
 
 @router.post("/generate-plan")
-async def generate_study_plan(request: GeneratePlanRequest):
+async def generate_study_plan(
+    request: GeneratePlanRequest,
+    user_data: dict = Depends(verify_clerk_token)
+):
     try:
         onboarding_data = request.onboarding_data
 
@@ -221,10 +229,22 @@ Use this JSON structure:
 
         plan = extract_json(response.text)
 
+        clerk_id = user_data.get("sub")
+
+        if not clerk_id:
+         raise RuntimeError("Authenticated user Clerk ID is missing")
+
+        # Save generated study plan for the authenticated user 
+        saved_plan = save_study_plan( 
+            clerk_id=clerk_id, 
+            plan_data=plan 
+        )
+
         return {
             "success": True,
             "model": model,
             "plan": plan,
+            "saved_plan": saved_plan,
         }
 
     except Exception as exc:
