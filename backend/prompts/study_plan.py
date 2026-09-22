@@ -3,8 +3,8 @@ Deterministic prompt template and schemas for generating structured JSON study p
 based on student onboarding data (goals, hours, semester, subjects).
 """
 import json
-from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Literal, Optional, Union, Dict, Any
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SubjectInput(BaseModel):
@@ -31,6 +31,70 @@ class OnboardingDataInput(BaseModel):
             ]
         return value
 
+    @field_validator("goals", mode="before")
+    @classmethod
+    def normalize_goals(cls, value):
+        if isinstance(value, str):
+            return [value]
+        return value
+
+
+# ---------------------------------------------------------------------------
+# Output Pydantic Schemas for Strict Response Validation
+# ---------------------------------------------------------------------------
+
+DayName = Literal["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+ActivityType = Literal["core_concept_study", "practice_problems", "lecture_review", "revision_quiz"]
+PriorityLevel = Literal["high", "medium", "low"]
+
+
+class PlanOverview(BaseModel):
+    student_semester: int = Field(..., description="Academic semester of the student")
+    daily_target_hours: float = Field(..., description="Target daily study hours")
+    weekly_total_hours: float = Field(..., description="Total planned study hours for the week")
+    primary_focus: str = Field(..., description="Primary academic goal/focus for the plan")
+    strategy_summary: str = Field(..., description="Summary of the strategic approach")
+
+
+class SessionItem(BaseModel):
+    subject: str = Field(..., description="Name of the subject")
+    topic: str = Field(..., description="Specific topic or unit to cover")
+    duration_hours: float = Field(..., description="Session duration in hours")
+    activity_type: ActivityType = Field(..., description="Type of study activity")
+    priority: PriorityLevel = Field(..., description="Session priority level")
+
+
+class DaySchedule(BaseModel):
+    day: DayName = Field(..., description="Day of the week")
+    total_hours: float = Field(..., description="Total allocated study hours for this day")
+    sessions: List[SessionItem] = Field(default_factory=list, description="List of study sessions for the day")
+
+
+class MonthlyMilestone(BaseModel):
+    week: int = Field(..., description="Week number (1-4)")
+    milestone: str = Field(..., description="High-level milestone description")
+    key_deliverable: str = Field(..., description="Tangible deliverable or assessment")
+
+
+class StudyPlanOutputSchema(BaseModel):
+    plan_overview: PlanOverview
+    weekly_schedule: List[DaySchedule]
+    monthly_milestones: List[MonthlyMilestone]
+    study_tips: List[str]
+
+    @model_validator(mode="after")
+    def validate_schedule_integrity(self):
+        if not self.weekly_schedule:
+            raise ValueError("weekly_schedule cannot be empty")
+        return self
+
+
+def validate_study_plan_output(data: dict) -> StudyPlanOutputSchema:
+    """
+    Validates a raw dictionary response against the strict StudyPlanOutputSchema Pydantic model.
+    Throws ValidationError if the schema is violated.
+    """
+    return StudyPlanOutputSchema.model_validate(data)
 
 
 STUDY_PLAN_SYSTEM_INSTRUCTION = """
@@ -98,3 +162,4 @@ Student Onboarding Profile:
 Please generate the structured 7-day study plan according to the system instructions and exact JSON schema.
 """
     return prompt.strip()
+
