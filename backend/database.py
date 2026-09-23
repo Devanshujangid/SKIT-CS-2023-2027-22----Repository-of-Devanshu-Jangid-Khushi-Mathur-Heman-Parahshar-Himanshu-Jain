@@ -54,3 +54,5 @@ def upsert_study_plan(clerk_id: str, plan_data: dict):
     )
 
     return response.data
+
+save_study_plan = upsert_study_plan
