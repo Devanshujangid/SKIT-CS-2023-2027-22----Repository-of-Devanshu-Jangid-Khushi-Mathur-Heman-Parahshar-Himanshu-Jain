@@ -23,37 +23,36 @@ def get_db() -> Client:
         raise RuntimeError("Database connection not initialized. Please configure SUPABASE_URL in .env")
     return supabase
 
-
-def save_study_plan(clerk_id: str, plan_data: dict) -> dict:
-    """
-    Save a generated study plan for the authenticated Clerk user.
-    """
+def upsert_study_plan(clerk_id: str, plan_data: dict):
     db = get_db()
 
-    # Find the internal Supabase user ID using Clerk ID
-    user_res = (
+    # Find internal user UUID using Clerk ID
+    user_response = (
         db.table("users")
         .select("id")
         .eq("clerk_id", clerk_id)
+        .limit(1)
         .execute()
     )
 
-    if not user_res.data:
-        raise RuntimeError("User not found for the provided Clerk ID")
+    if not user_response.data:
+        raise ValueError("User not found")
 
-    user_id = user_res.data[0]["id"]
+    user_id = user_response.data[0]["id"]
 
-    # Save the generated study plan against that user
-    plan_res = (
+    # Insert or update the user's study plan
+    response = (
         db.table("study_plans")
-        .insert({
-            "user_id": user_id,
-            "plan_data": plan_data
-        })
+        .upsert(
+            {
+                "user_id": user_id,
+                "plan_data": plan_data,
+            },
+            on_conflict="user_id"
+        )
         .execute()
     )
 
-    if not plan_res.data:
-        raise RuntimeError("Study plan could not be saved")
+    return response.data
 
-    return plan_res.data[0]
+save_study_plan = upsert_study_plan
