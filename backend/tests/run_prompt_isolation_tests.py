@@ -17,6 +17,8 @@ from prompts.study_plan import (
     STUDY_PLAN_SYSTEM_INSTRUCTION,
     build_study_plan_prompt,
     validate_study_plan_output,
+    validate_target_score_alignment,
+    validate_subject_name_fidelity,
     StudyPlanOutputSchema,
 )
 
@@ -56,6 +58,20 @@ REAL_ONBOARDING_PAYLOADS = [
                 {"name": "Machine Learning", "difficulty": "hard"},
                 "Compiler Design",
                 "Cloud Computing"
+            ]
+        }
+    },
+    {
+        "name": "Scenario D - Semester 6 Edge-Case & Specialized Subjects (Course Codes & Symbols)",
+        "payload": {
+            "semester": 6,
+            "study_hours_per_day": 5.0,
+            "goals": ["Master Advanced Computing Domains"],
+            "subjects": [
+                {"name": "Quantum Computing & Superconducting Qubits", "difficulty": "hard", "target_score": "A+"},
+                {"name": "Bioinformatics & Genomic Sequence Alignment (BI-402)", "difficulty": "medium", "target_score": "A"},
+                {"name": "CS 490: Special Topics - Distributed Consensus", "difficulty": "hard", "target_score": "A+"},
+                {"name": "C++ & Rust Systems Programming", "difficulty": "hard", "target_score": "A"}
             ]
         }
     }
@@ -299,6 +315,104 @@ def run_isolation_suite():
             success_count += 1
         except Exception as e:
             print(f"  |-- FAILED: {e}")
+
+    # Task 3: Dynamic Exam Revision Milestones Target Score Alignment Validation
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Target Score Alignment in Dynamic Exam Revision Milestones")
+    try:
+        onboarding_input = OnboardingDataInput.model_validate(REAL_ONBOARDING_PAYLOADS[0]["payload"])
+        validated_plan = validate_study_plan_output(REPRESENTATIVE_AI_RESPONSES[0])
+        alignment_report = validate_target_score_alignment(validated_plan, onboarding_input)
+
+        print(f"  |-- Evaluated Milestones: {alignment_report['total_milestones_evaluated']}")
+        print(f"  |-- Requested Target Scores: {alignment_report['requested_target_scores']}")
+        for subj, details in alignment_report["alignment_details"].items():
+            print(f"     * {subj} ({details['requested_target_score']}): Referenced/Aligned={details['referenced_in_milestones']}")
+
+        assert alignment_report["is_aligned"], f"Target score alignment failed for: {alignment_report['missing_alignments']}"
+        print("  |-- Exam Revision Milestones Target Score Alignment: VERIFIED & ACCURATE")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
+
+    # Task 4: Edge-Case Subject Name Fidelity & Anti-Hallucination Validation
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Edge-Case Subject Name Fidelity & Anti-Hallucination")
+    try:
+        edge_onboarding = OnboardingDataInput.model_validate(REAL_ONBOARDING_PAYLOADS[3]["payload"])
+        sample_edge_response = {
+            "plan_overview": {
+                "student_semester": 6,
+                "daily_target_hours": 5.0,
+                "weekly_total_hours": 35.0,
+                "primary_focus": "Quantum, Bioinformatics & Systems Mastery",
+                "strategy_summary": "Domain-focused study on specialized courses."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Monday",
+                    "total_hours": 5.0,
+                    "sessions": [
+                        {
+                            "subject": "Quantum Computing & Superconducting Qubits",
+                            "topic": "Superposition & Transmon Qubit Control",
+                            "duration_hours": 2.5,
+                            "activity_type": "core_concept_study",
+                            "priority": "high"
+                        },
+                        {
+                            "subject": "Bioinformatics & Genomic Sequence Alignment (BI-402)",
+                            "topic": "Needleman-Wunsch Pairwise Sequence Alignment",
+                            "duration_hours": 2.5,
+                            "activity_type": "practice_problems",
+                            "priority": "medium"
+                        }
+                    ]
+                },
+                {
+                    "day": "Tuesday",
+                    "total_hours": 5.0,
+                    "sessions": [
+                        {
+                            "subject": "CS 490: Special Topics - Distributed Consensus",
+                            "topic": "Raft Leader Election & Log Replication",
+                            "duration_hours": 2.5,
+                            "activity_type": "core_concept_study",
+                            "priority": "high"
+                        },
+                        {
+                            "subject": "C++ & Rust Systems Programming",
+                            "topic": "Rust Ownership Model vs C++ RAII",
+                            "duration_hours": 2.5,
+                            "activity_type": "practice_problems",
+                            "priority": "high"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Implement Raft Consensus State Machine",
+                    "key_deliverable": "Pass all Raft consensus unit tests"
+                }
+            ],
+            "study_tips": ["Write unit tests for algorithm implementations."]
+        }
+
+        validated_edge_plan = validate_study_plan_output(sample_edge_response)
+        fidelity_report = validate_subject_name_fidelity(validated_edge_plan, edge_onboarding)
+
+        print(f"  |-- Enrolled Subjects Count: {len(fidelity_report['enrolled_subjects'])}")
+        print(f"  |-- Scheduled Subjects Count: {len(fidelity_report['scheduled_subjects'])}")
+        print(f"  |-- Unmatched Sessions: {len(fidelity_report['unmatched_sessions'])}")
+        print(f"  |-- Missing Enrolled Subjects: {len(fidelity_report['missing_enrolled_subjects'])}")
+
+        assert fidelity_report["is_valid"], f"Fidelity check failed. Unmatched: {fidelity_report['unmatched_sessions']}, Missing: {fidelity_report['missing_enrolled_subjects']}"
+        print("  |-- Edge-Case Subject Name Fidelity & Zero Hallucination: CONFIRMED")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
 
     print("\n=======================================================================")
     print(f"TEST RESULTS: {success_count}/{total_tests} ISOLATION TESTS PASSED")

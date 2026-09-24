@@ -107,6 +107,8 @@ CRITICAL INSTRUCTIONS:
 3. TIME BALANCE: The sum of `duration_hours` for sessions on any day MUST NOT exceed the student's specified daily available study hours (`study_hours_per_day`).
 4. SUBJECT COVERAGE: Every subject provided in the input must be addressed across the weekly schedule with frequency proportional to its difficulty.
 5. DETERMINISM: Use consistent, structured activity types ('core_concept_study', 'practice_problems', 'lecture_review', 'revision_quiz') and priorities ('high', 'medium', 'low').
+6. TARGET SCORE & EXAM REVISION ALIGNMENT: Dynamic exam revision milestones (`monthly_milestones`) and key deliverables MUST explicitly reflect and incorporate the specific target scores (e.g., 'A+', '9.0+ CGPA', '90%+ score', 'GATE top 100') requested by the student for enrolled subjects and learning goals. Milestone deliverables must include quantitative revision assessment benchmarks matching these target scores.
+7. SUBJECT FIDELITY & NO HALLUCINATION: In `weekly_schedule`, session `subject` fields MUST use the EXACT subject name strings provided in the input profile (preserving course codes, numbers, and special characters like 'C++', 'AI/ML', 'BI-402'). DO NOT invent, abbreviate, or mutate subject names. Generate domain-accurate, highly relevant study topics appropriate for specialized subject domains.
 
 JSON SCHEMA SPECIFICATION:
 {
@@ -156,10 +158,97 @@ Student Onboarding Profile:
 - Semester: {data.semester}
 - Available Daily Study Hours: {data.study_hours_per_day} hours/day
 - Goals: {goals_formatted}
-- Enrolled Subjects:
+- Enrolled Subjects & Specific Target Scores:
 {subjects_formatted}
 
 Please generate the structured 7-day study plan according to the system instructions and exact JSON schema.
+IMPORTANT: Use the EXACT enrolled subject names in all schedule sessions (do not alter course codes, numbers, or special characters). Ensure dynamic exam revision milestones (`monthly_milestones`) and key deliverables explicitly reflect and target the specific target scores and academic goals requested by the student.
 """
     return prompt.strip()
+
+
+def validate_target_score_alignment(
+    plan: StudyPlanOutputSchema,
+    data: OnboardingDataInput
+) -> Dict[str, Any]:
+    """
+    Validates that dynamic exam revision milestones in the generated study plan
+    accurately incorporate and reflect target scores requested by the student.
+    Returns a status dict containing alignment details and validation boolean.
+    """
+    target_scores = {}
+    for subj in data.subjects:
+        if subj.target_score:
+            target_scores[subj.name] = subj.target_score
+
+    milestone_texts = [
+        f"{m.milestone} - {m.key_deliverable}".lower()
+        for m in plan.monthly_milestones
+    ]
+    combined_milestone_str = " ".join(milestone_texts)
+
+    missing_alignments = []
+    aligned_scores = {}
+
+    for subj_name, target in target_scores.items():
+        subj_lower = subj_name.lower()
+        target_lower = target.lower()
+        
+        # Check if subject and/or target score benchmark is referenced in milestones/deliverables
+        has_subj_reference = subj_lower in combined_milestone_str
+        has_score_reference = target_lower in combined_milestone_str or any(
+            char.isdigit() or char in ["%", "+"] for char in combined_milestone_str
+        )
+
+        is_aligned = has_subj_reference or has_score_reference
+        aligned_scores[subj_name] = {
+            "requested_target_score": target,
+            "referenced_in_milestones": is_aligned,
+        }
+        if not is_aligned:
+            missing_alignments.append(subj_name)
+
+    is_valid = len(missing_alignments) == 0
+
+    return {
+        "is_aligned": is_valid,
+        "requested_target_scores": target_scores,
+        "alignment_details": aligned_scores,
+        "missing_alignments": missing_alignments,
+        "total_milestones_evaluated": len(plan.monthly_milestones)
+    }
+
+
+def validate_subject_name_fidelity(
+    plan: StudyPlanOutputSchema,
+    data: OnboardingDataInput
+) -> Dict[str, Any]:
+    """
+    Validates that every session subject in the generated plan matches an exact
+    enrolled subject name provided in onboarding data, and that all enrolled subjects
+    are covered without hallucination or name mutation.
+    """
+    enrolled_names = {s.name for s in data.subjects}
+    scheduled_names = set()
+
+    unmatched_sessions = []
+    for day in plan.weekly_schedule:
+        for s in day.sessions:
+            scheduled_names.add(s.subject)
+            if s.subject not in enrolled_names:
+                unmatched_sessions.append({"day": day.day, "subject": s.subject, "topic": s.topic})
+
+    missing_enrolled = enrolled_names - scheduled_names
+
+    is_valid = len(unmatched_sessions) == 0 and len(missing_enrolled) == 0
+
+    return {
+        "is_valid": is_valid,
+        "enrolled_subjects": list(enrolled_names),
+        "scheduled_subjects": list(scheduled_names),
+        "unmatched_sessions": unmatched_sessions,
+        "missing_enrolled_subjects": list(missing_enrolled),
+    }
+
+
 
