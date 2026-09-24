@@ -18,10 +18,12 @@ async def get_plans(
     try:
         db = get_db()
 
+        # Find internal user UUID using Clerk ID
         user_res = (
             db.table("users")
             .select("id")
             .eq("clerk_id", clerk_id)
+            .limit(1)
             .execute()
         )
 
@@ -33,9 +35,10 @@ async def get_plans(
 
         user_id = user_res.data[0]["id"]
 
+        # Fetch only required study-plan fields
         plans_res = (
             db.table("study_plans")
-            .select("id, user_id, plan_data, created_at, updated_at")
+            .select("id, plan_data, created_at, updated_at")
             .eq("user_id", user_id)
             .execute()
         )
