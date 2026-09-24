@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
+import Link from "next/link";
 import { 
   BookOpen, 
   Clock, 
@@ -14,7 +15,8 @@ import {
   Calendar,
   CheckCircle2,
   TrendingUp,
-  Award
+  Award,
+  UserCheck
 } from "lucide-react";
 
 interface StatCardProps {
@@ -23,6 +25,13 @@ interface StatCardProps {
   value: string;
   subtitle?: string;
   isLoading?: boolean;
+}
+
+interface UserProfileState {
+  semester?: number;
+  study_hours_per_day?: number;
+  goals?: string;
+  subjects?: string[];
 }
 
 interface ScheduleTask {
@@ -119,16 +128,22 @@ export default function DashboardPage() {
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [hasPlan, setHasPlan] = useState<boolean>(true);
+  const [userProfile, setUserProfile] = useState<UserProfileState | null>(null);
 
-  // Load completed tasks from localStorage on initial render
+  // Load completed tasks & saved user profile from localStorage
   useEffect(() => {
     try {
       const savedCompleted = localStorage.getItem("slp_completed_tasks");
       if (savedCompleted) {
         setCompletedTaskIds(JSON.parse(savedCompleted));
       }
+
+      const savedProfile = localStorage.getItem("slp_user_profile");
+      if (savedProfile) {
+        setUserProfile(JSON.parse(savedProfile));
+      }
     } catch (e) {
-      console.error("Failed to load completed tasks from localStorage:", e);
+      console.error("Failed to load state from localStorage:", e);
     }
   }, []);
 
@@ -175,17 +190,36 @@ export default function DashboardPage() {
     return <DashboardSkeleton onToggleLoading={toggleLoading} />;
   }
 
+  // Dynamic values based on onboarding profile or defaults
+  const displaySemester = userProfile?.semester ? `Semester ${userProfile.semester}` : "Semester 5";
+  const displayWeeklyHours = userProfile?.study_hours_per_day 
+    ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs` 
+    : "28.5 hrs";
+  const displayDailyHoursSubtitle = userProfile?.study_hours_per_day 
+    ? `${userProfile.study_hours_per_day} hrs/day target` 
+    : "Target plan";
+  const displayFocusSubject = (userProfile?.subjects && userProfile.subjects.length > 0)
+    ? userProfile.subjects[0]
+    : "Data Structures";
+
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-8">
         
-        {/* Testing & Control Bar */}
+        {/* Testing & Navigation Control Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
             <Sparkles className="h-4 w-4 text-indigo-600" />
             <span>Smart Planner Dashboard</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/onboarding"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
+              Edit Profile / Onboarding
+            </Link>
             <button
               onClick={togglePlanState}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
@@ -206,7 +240,7 @@ export default function DashboardPage() {
         <header className="flex items-center justify-between rounded-2xl bg-white p-6 shadow-sm">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-              Welcome back, {user?.firstName || "Student"}! 👋
+              Welcome back, {user?.firstName || user?.username || "Student"}! 👋
             </h1>
             <p className="mt-1 text-slate-600">Let's map out your academic success.</p>
           </div>
@@ -218,19 +252,19 @@ export default function DashboardPage() {
           <StatCard
             icon={<Clock className="h-6 w-6" />}
             title="Total Weekly Hours"
-            value="28.5 hrs"
-            subtitle="Target plan"
+            value={displayWeeklyHours}
+            subtitle={displayDailyHoursSubtitle}
           />
           <StatCard
             icon={<Target className="h-6 w-6" />}
             title="Primary Focus"
-            value="Data Structures"
+            value={displayFocusSubject}
             subtitle="High priority"
           />
           <StatCard
             icon={<BookOpen className="h-6 w-6" />}
             title="Active Semester"
-            value="Semester 5"
+            value={displaySemester}
             subtitle="Fall 2026"
           />
           <StatCard
@@ -240,6 +274,7 @@ export default function DashboardPage() {
             subtitle={`${completedTasksCount} of ${totalTasksCount} tasks done`}
           />
         </section>
+
 
         {/* Main Section */}
         {!hasPlan ? (
