@@ -66,20 +66,24 @@ def get_target_model() -> str:
 # Helper: Generate Gemini Text
 # -----------------------------
 
-def generate_gemini_response(prompt: str) -> str:
+def generate_gemini_response(prompt: str, system_instruction: str = None) -> str:
     client = get_gemini_client()
     model = get_target_model()
 
+    max_attempts = 3
+    base_delay = 2
     last_error = None
 
-    for attempt in range(3):
+    for attempt in range(max_attempts):
         try:
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                system_instruction=system_instruction if system_instruction else None,
+            )
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-              )
+                config=config
             )
 
             if not response.text:
@@ -89,15 +93,49 @@ def generate_gemini_response(prompt: str) -> str:
 
         except Exception as exc:
             last_error = exc
-            logger.exception(
-                "Gemini request failed on attempt %s/3",
-                attempt + 1
+
+            error_text = str(exc).lower()
+
+            retryable = any(
+                keyword in error_text
+                for keyword in [
+                    "429",
+                    "rate limit",
+                    "resource exhausted",
+                    "503",
+                    "service unavailable",
+                    "timeout",
+                    "timed out",
+                    "temporarily unavailable",
+                ]
             )
 
-            if attempt < 2:
-                time.sleep(2)
+            logger.warning(
+                "Gemini request failed on attempt %s/%s: %s",
+                attempt + 1,
+                max_attempts,
+                exc,
+            )
 
-    raise RuntimeError(f"Gemini API error: {last_error}")
+            if not retryable:
+                raise RuntimeError(
+                    f"Gemini API error: {exc}"
+                ) from exc
+
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt)
+
+                logger.warning(
+                    "Retrying Gemini request in %s seconds...",
+                    delay,
+                )
+
+                time.sleep(delay)
+
+    raise RuntimeError(
+        f"Gemini API failed after {max_attempts} attempts: {last_error}"
+    )
+
 
 
 # -----------------------------
@@ -142,6 +180,7 @@ def extract_json(text: str) -> Dict[str, Any]:
             ) from exc
 
 
+
 # -----------------------------
 # Test Endpoint
 # -----------------------------
@@ -180,22 +219,14 @@ async def generate_study_plan(
 
         user_prompt = build_study_plan_prompt(onboarding_data)
 
-        client = get_gemini_client()
         model = get_target_model()
 
-        response = client.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION,
-                response_mime_type="application/json"
-            )
+        response_text = generate_gemini_response(
+            prompt=user_prompt,
+            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
         )
 
-        if not response.text:
-            raise RuntimeError("Gemini returned an empty study plan")
-
-        raw_plan = extract_json(response.text)
+        raw_plan = extract_json(response_text)
         validated_plan = validate_study_plan_output(raw_plan)
 
         clerk_id = user_data.get("sub")
@@ -222,4 +253,4 @@ async def generate_study_plan(
         raise HTTPException(
             status_code=500,
             detail=str(exc)
-        )
+        )
