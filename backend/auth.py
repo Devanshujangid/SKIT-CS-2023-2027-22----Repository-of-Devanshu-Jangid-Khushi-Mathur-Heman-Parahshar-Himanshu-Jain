@@ -9,17 +9,17 @@ load_dotenv()
 
 security = HTTPBearer(auto_error=False)
 
-CLERK_ISSUER_URL = os.getenv("CLERK_ISSUER_URL")
+CLERK_ISSUER_URL = os.getenv("CLERK_ISSUER_URL", "")
 
 if not CLERK_ISSUER_URL:
-    raise RuntimeError("CLERK_ISSUER_URL is missing in backend/.env")
+    print("Notice: CLERK_ISSUER_URL is missing in backend/.env. Running in dev mock auth mode.")
 
 
 async def verify_clerk_token(
     credentials: HTTPAuthorizationCredentials = Security(security)
 ) -> dict:
 
-    if not credentials or not credentials.credentials:
+    if not CLERK_ISSUER_URL or not credentials or not credentials.credentials:
         return {
             "sub": "dev_user_default",
             "email": "student@example.com"

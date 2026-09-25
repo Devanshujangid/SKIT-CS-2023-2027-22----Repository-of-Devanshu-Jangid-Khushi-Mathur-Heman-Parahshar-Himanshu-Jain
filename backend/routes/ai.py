@@ -13,7 +13,12 @@ from pydantic import BaseModel
 from google import genai
 from google.genai import types
 
-from prompts.study_plan import OnboardingDataInput
+from prompts.study_plan import (
+    OnboardingDataInput,
+    STUDY_PLAN_SYSTEM_INSTRUCTION,
+    build_study_plan_prompt,
+    validate_study_plan_output,
+)
 from auth import verify_clerk_token
 from database import save_study_plan
 
@@ -61,7 +66,7 @@ def get_target_model() -> str:
 # Helper: Generate Gemini Text
 # -----------------------------
 
-def generate_gemini_response(prompt: str) -> str:
+def generate_gemini_response(prompt: str, system_instruction: str = None) -> str:
     client = get_gemini_client()
     model = get_target_model()
 
@@ -71,13 +76,14 @@ def generate_gemini_response(prompt: str) -> str:
 
     for attempt in range(max_attempts):
         try:
-            
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                system_instruction=system_instruction if system_instruction else None,
+            )
             response = client.models.generate_content(
                 model=model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
+                config=config
             )
 
             if not response.text:
@@ -211,67 +217,33 @@ async def generate_study_plan(
     try:
         onboarding_data = request.onboarding_data
 
-        prompt = f"""
-You are an AI study planner for a B.Tech Computer Science student.
-
-Create a personalized 7-day study plan using the student's onboarding data.
-
-Student data:
-{onboarding_data.model_dump_json(indent=2)}
-
-Requirements:
-1. Respect the student's available study hours per day.
-2. Prioritize difficult subjects.
-3. Include revision and practice sessions.
-4. Include GATE-style preparation where appropriate.
-5. Avoid unrealistic workloads.
-6. Return ONLY valid JSON.
-7. Do not include Markdown code fences.
-
-Use this JSON structure:
-
-{{
-  "plan_title": "string",
-  "weekly_goal": "string",
-  "days": [
-    {{
-      "day": "Day 1",
-      "date": "string",
-      "tasks": [
-        {{
-          "subject": "string",
-          "topic": "string",
-          "activity": "string",
-          "duration_minutes": 60,
-          "priority": "high"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
+        user_prompt = build_study_plan_prompt(onboarding_data)
 
         model = get_target_model()
 
-        response = generate_gemini_response(prompt)
+        response_text = generate_gemini_response(
+            prompt=user_prompt,
+            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
+        )
 
-        plan = extract_json(response)
+        raw_plan = extract_json(response_text)
+        validated_plan = validate_study_plan_output(raw_plan)
 
         clerk_id = user_data.get("sub")
 
         if not clerk_id:
-         raise RuntimeError("Authenticated user Clerk ID is missing")
+            raise RuntimeError("Authenticated user Clerk ID is missing")
 
         # Save generated study plan for the authenticated user 
         saved_plan = save_study_plan( 
             clerk_id=clerk_id, 
-            plan_data=plan 
+            plan_data=validated_plan.model_dump() 
         )
 
         return {
             "success": True,
             "model": model,
-            "plan": plan,
+            "plan": validated_plan.model_dump(),
             "saved_plan": saved_plan,
         }
 
@@ -281,4 +253,4 @@ Use this JSON structure:
         raise HTTPException(
             status_code=500,
             detail=str(exc)
-        )
+        )
