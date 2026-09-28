@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 
 from google import genai
@@ -180,6 +180,32 @@ def extract_json(text: str) -> Dict[str, Any]:
             ) from exc
 
 
+def generate_and_save_plan(
+    user_prompt: str,
+    clerk_id: str
+):
+    try:
+        logger.info("Background study plan generation started")
+
+        response_text = generate_gemini_response(
+            prompt=user_prompt,
+            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
+        )
+
+        raw_plan = extract_json(response_text)
+        validated_plan = validate_study_plan_output(raw_plan)
+
+        save_study_plan(
+            clerk_id=clerk_id,
+            plan_data=validated_plan.model_dump()
+        )
+
+        logger.info("Background study plan generation completed successfully")
+
+    except Exception:
+        logger.exception(
+            "Background study plan generation failed"
+        )
 
 # -----------------------------
 # Test Endpoint
@@ -212,6 +238,7 @@ async def test_ai(request: TestPromptRequest):
 @router.post("/generate-plan")
 async def generate_study_plan(
     request: GeneratePlanRequest,
+    background_tasks: BackgroundTasks,
     user_data: dict = Depends(verify_clerk_token)
 ):
     try:
@@ -221,30 +248,20 @@ async def generate_study_plan(
 
         model = get_target_model()
 
-        response_text = generate_gemini_response(
-            prompt=user_prompt,
-            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
-        )
-
-        raw_plan = extract_json(response_text)
-        validated_plan = validate_study_plan_output(raw_plan)
 
         clerk_id = user_data.get("sub")
 
         if not clerk_id:
             raise RuntimeError("Authenticated user Clerk ID is missing")
 
-        # Save generated study plan for the authenticated user 
-        saved_plan = save_study_plan( 
-            clerk_id=clerk_id, 
-            plan_data=validated_plan.model_dump() 
-        )
+        # Add the background task to generate and save the study plan
+        background_tasks.add_task(generate_and_save_plan, user_prompt=user_prompt, clerk_id=clerk_id)
 
         return {
             "success": True,
+            "message": "Study plan generation started",
             "model": model,
-            "plan": validated_plan.model_dump(),
-            "saved_plan": saved_plan,
+            
         }
 
     except Exception as exc:
@@ -253,4 +270,4 @@ async def generate_study_plan(
         raise HTTPException(
             status_code=500,
             detail=str(exc)
-        )
+        )

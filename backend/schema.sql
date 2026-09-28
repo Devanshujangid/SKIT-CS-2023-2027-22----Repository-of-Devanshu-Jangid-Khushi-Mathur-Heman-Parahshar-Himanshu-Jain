@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Create student_profiles table
 CREATE TABLE IF NOT EXISTS student_profiles (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE NOT NULL,
     semester INT NOT NULL,
     study_hours_per_day FLOAT NOT NULL,
