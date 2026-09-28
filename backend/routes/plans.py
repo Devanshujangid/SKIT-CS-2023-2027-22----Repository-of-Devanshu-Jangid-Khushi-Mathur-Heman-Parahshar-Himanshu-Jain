@@ -38,8 +38,11 @@ async def get_plans(
         # Fetch only required study-plan fields
         plans_res = (
             db.table("study_plans")
-            .select("id, plan_data, created_at, updated_at")
+            .select("id, plan_data, created_at, updated_at, is_active")
             .eq("user_id", user_id)
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .limit(1)
             .execute()
         )
 
