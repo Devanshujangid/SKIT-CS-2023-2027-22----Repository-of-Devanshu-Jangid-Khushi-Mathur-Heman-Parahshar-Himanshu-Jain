@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useUser, UserButton } from "@clerk/nextjs";
+import { useUser, useAuth, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
+import { API_BASE_URL } from "@/lib/api";
 import { 
   BookOpen, 
   Clock, 
@@ -16,7 +17,11 @@ import {
   CheckCircle2,
   TrendingUp,
   Award,
-  UserCheck
+  UserCheck,
+  Wifi,
+  AlertCircle,
+  Lightbulb,
+  Milestone
 } from "lucide-react";
 
 interface StatCardProps {
@@ -50,7 +55,102 @@ interface ScheduleDay {
   tasks: ScheduleTask[];
 }
 
-// 7-Day Sample Academic Schedule Data
+// Backend Plan API Models
+interface PlanOverviewData {
+  student_semester?: number;
+  daily_target_hours?: number;
+  weekly_total_hours?: number;
+  primary_focus?: string;
+  strategy_summary?: string;
+}
+
+interface BackendSession {
+  subject: string;
+  topic: string;
+  duration_hours: number;
+  activity_type: string;
+  priority: "high" | "medium" | "low";
+}
+
+interface BackendDaySchedule {
+  day: string;
+  total_hours: number;
+  sessions: BackendSession[];
+}
+
+interface MonthlyMilestone {
+  week: number;
+  milestone: string;
+  key_deliverable: string;
+}
+
+interface BackendPlanData {
+  plan_overview?: PlanOverviewData;
+  weekly_schedule?: BackendDaySchedule[];
+  monthly_milestones?: MonthlyMilestone[];
+  study_tips?: string[];
+}
+
+interface PlanRecord {
+  id: string;
+  plan_data: BackendPlanData;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Map backend day names to day numbers
+const DAY_NAME_TO_NUMBER: Record<string, number> = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+  Sunday: 7,
+};
+
+function formatActivityType(typeStr: string): string {
+  if (!typeStr) return "Study Session";
+  const map: Record<string, string> = {
+    core_concept_study: "Core Concept Study",
+    practice_problems: "Practice Problems",
+    lecture_review: "Lecture Review",
+    revision_quiz: "Revision Quiz",
+  };
+  if (map[typeStr]) return map[typeStr];
+  return typeStr
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[] {
+  return weeklySchedule.map((dayItem, dayIdx) => {
+    const dayName = dayItem.day || `Day ${dayIdx + 1}`;
+    const dayNumber = DAY_NAME_TO_NUMBER[dayName] || (dayIdx + 1);
+
+    const tasks: ScheduleTask[] = (dayItem.sessions || []).map((sess, sessIdx) => {
+      const durationMins = Math.round((sess.duration_hours || 1) * 60);
+      return {
+        id: `live-d${dayNumber}-t${sessIdx + 1}`,
+        subject: sess.subject || "General Study",
+        topic: sess.topic || "Core Topic",
+        activity: formatActivityType(sess.activity_type),
+        duration_minutes: durationMins,
+        priority: sess.priority || "medium",
+      };
+    });
+
+    return {
+      dayNumber,
+      dayName,
+      dateStr: `Day ${dayNumber}`,
+      tasks,
+    };
+  });
+}
+
+// 7-Day Sample Academic Schedule Data (Fallback/Initial)
 const INITIAL_7_DAY_SCHEDULE: ScheduleDay[] = [
   {
     dayNumber: 1,
@@ -124,11 +224,23 @@ const INITIAL_7_DAY_SCHEDULE: ScheduleDay[] = [
 
 export default function DashboardPage() {
   const { user, isLoaded: isUserLoaded } = useUser();
+  const { getToken, isLoaded: isAuthLoaded, isSignedIn } = useAuth();
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [hasPlan, setHasPlan] = useState<boolean>(true);
   const [userProfile, setUserProfile] = useState<UserProfileState | null>(null);
+
+  // Live Plan Data State from GET /api/v1/plans
+  const [schedule, setSchedule] = useState<ScheduleDay[]>(INITIAL_7_DAY_SCHEDULE);
+  const [planOverview, setPlanOverview] = useState<PlanOverviewData | null>(null);
+  const [monthlyMilestones, setMonthlyMilestones] = useState<MonthlyMilestone[]>([]);
+  const [studyTips, setStudyTips] = useState<string[]>([]);
+  const [plans, setPlans] = useState<PlanRecord[]>([]);
+  const [isFetchingPlans, setIsFetchingPlans] = useState<boolean>(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isLiveSynced, setIsLiveSynced] = useState<boolean>(false);
 
   // Load completed tasks & saved user profile from localStorage
   useEffect(() => {
@@ -147,13 +259,92 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Simulate loading delay for skeleton preview
-  useEffect(() => {
-    const timer = setTimeout(() => {
+  // Fetch live study plans from GET /api/v1/plans with Clerk JWT
+  const fetchPlans = async () => {
+    setIsFetchingPlans(true);
+    setFetchError(null);
+
+    try {
+      // Securely acquire Clerk JWT token
+      const token = await getToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`GET /api/v1/plans returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && Array.isArray(data.plans)) {
+        setPlans(data.plans);
+        setIsLiveSynced(true);
+
+        if (data.plans.length > 0) {
+          // Process latest generated study plan
+          const latestPlan = data.plans[data.plans.length - 1];
+          let planData: BackendPlanData | null = null;
+          
+          if (typeof latestPlan.plan_data === "string") {
+            try {
+              planData = JSON.parse(latestPlan.plan_data);
+            } catch (e) {
+              console.error("Failed to parse plan_data string:", e);
+            }
+          } else {
+            planData = latestPlan.plan_data;
+          }
+
+          if (planData) {
+            if (planData.plan_overview) {
+              setPlanOverview(planData.plan_overview);
+            }
+            if (planData.monthly_milestones) {
+              setMonthlyMilestones(planData.monthly_milestones);
+            }
+            if (planData.study_tips) {
+              setStudyTips(planData.study_tips);
+            }
+            if (planData.weekly_schedule && planData.weekly_schedule.length > 0) {
+              const mappedSchedule = parseWeeklySchedule(planData.weekly_schedule);
+              setSchedule(mappedSchedule);
+              setHasPlan(true);
+            }
+          }
+        } else {
+          // User has no study plans in database
+          setHasPlan(false);
+        }
+      } else {
+        setFetchError("API returned unsuccessful payload format");
+      }
+    } catch (err: any) {
+      console.error("Error fetching live study plans:", err);
+      setFetchError(err.message || "Network error fetching study plans");
+    } finally {
+      setIsFetchingPlans(false);
       setIsLoading(false);
-    }, 1200);
-    return () => clearTimeout(timer);
-  }, []);
+    }
+  };
+
+  // Trigger live data fetch on mount & whenever auth is ready
+  useEffect(() => {
+    if (isAuthLoaded) {
+      fetchPlans();
+    } else {
+      // Fallback timer if auth load takes long
+      const timer = setTimeout(() => {
+        setIsLoading(false);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthLoaded, isSignedIn]);
 
   // Save completed tasks to localStorage when state updates
   const toggleTaskCompletion = (taskId: string) => {
@@ -174,31 +365,45 @@ export default function DashboardPage() {
   const toggleLoading = () => setIsLoading((prev) => !prev);
   const togglePlanState = () => setHasPlan((prev) => !prev);
 
-  // Calculate totals & completion metrics
-  const allTasks = INITIAL_7_DAY_SCHEDULE.flatMap((day) => day.tasks);
+  // Calculate totals & completion metrics based on live schedule
+  const activeSchedule = schedule.length > 0 ? schedule : INITIAL_7_DAY_SCHEDULE;
+  const allTasks = activeSchedule.flatMap((day) => day.tasks);
   const totalTasksCount = allTasks.length;
-  const completedTasksCount = completedTaskIds.length;
+  const completedTasksCount = completedTaskIds.filter(id => allTasks.some(t => t.id === id)).length;
   const weeklyProgressPercent = totalTasksCount > 0 
     ? Math.round((completedTasksCount / totalTasksCount) * 100) 
     : 0;
 
-  const currentDaySchedule = INITIAL_7_DAY_SCHEDULE.find((d) => d.dayNumber === selectedDay) || INITIAL_7_DAY_SCHEDULE[0];
-  const dayCompletedCount = currentDaySchedule.tasks.filter((t) => completedTaskIds.includes(t.id)).length;
-  const dayTotalCount = currentDaySchedule.tasks.length;
+  const currentDaySchedule = activeSchedule.find((d) => d.dayNumber === selectedDay) || activeSchedule[0];
+  const dayCompletedCount = currentDaySchedule ? currentDaySchedule.tasks.filter((t) => completedTaskIds.includes(t.id)).length : 0;
+  const dayTotalCount = currentDaySchedule ? currentDaySchedule.tasks.length : 0;
 
   if (isLoading || !isUserLoaded) {
     return <DashboardSkeleton onToggleLoading={toggleLoading} />;
   }
 
-  // Dynamic values based on onboarding profile or defaults
-  const displaySemester = userProfile?.semester ? `Semester ${userProfile.semester}` : "Semester 5";
-  const displayWeeklyHours = userProfile?.study_hours_per_day 
-    ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs` 
+  // Dynamic metric values based on live plan, user profile or defaults
+  const displaySemester = planOverview?.student_semester
+    ? `Semester ${planOverview.student_semester}`
+    : userProfile?.semester
+    ? `Semester ${userProfile.semester}`
+    : "Semester 5";
+
+  const displayWeeklyHours = planOverview?.weekly_total_hours
+    ? `${planOverview.weekly_total_hours} hrs`
+    : userProfile?.study_hours_per_day
+    ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
     : "28.5 hrs";
-  const displayDailyHoursSubtitle = userProfile?.study_hours_per_day 
-    ? `${userProfile.study_hours_per_day} hrs/day target` 
+
+  const displayDailyHoursSubtitle = planOverview?.daily_target_hours
+    ? `${planOverview.daily_target_hours} hrs/day target`
+    : userProfile?.study_hours_per_day
+    ? `${userProfile.study_hours_per_day} hrs/day target`
     : "Target plan";
-  const displayFocusSubject = (userProfile?.subjects && userProfile.subjects.length > 0)
+
+  const displayFocusSubject = planOverview?.primary_focus
+    ? planOverview.primary_focus
+    : (userProfile?.subjects && userProfile.subjects.length > 0)
     ? userProfile.subjects[0]
     : "Data Structures";
 
@@ -206,13 +411,45 @@ export default function DashboardPage() {
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-8">
         
-        {/* Testing & Navigation Control Bar */}
+        {/* Testing & Navigation Control Bar with Live API Status */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            <Sparkles className="h-4 w-4 text-indigo-600" />
-            <span>Smart Planner Dashboard</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              <Sparkles className="h-4 w-4 text-indigo-600" />
+              <span>Smart Planner Dashboard</span>
+            </div>
+
+            {/* Live API Sync Badge */}
+            <div className="flex items-center gap-1.5 text-xs font-medium">
+              {isFetchingPlans ? (
+                <span className="inline-flex items-center gap-1 text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-200">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Fetching live plans...
+                </span>
+              ) : isLiveSynced ? (
+                <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                  <Wifi className="h-3 w-3 text-emerald-600" />
+                  GET /api/v1/plans Synced
+                </span>
+              ) : fetchError ? (
+                <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200" title={fetchError}>
+                  <AlertCircle className="h-3 w-3 text-amber-600" />
+                  Offline Preview
+                </span>
+              ) : null}
+            </div>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={fetchPlans}
+              disabled={isFetchingPlans}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh live study plan data from backend API"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetchingPlans ? "animate-spin text-indigo-600" : ""}`} />
+              Refetch API
+            </button>
             <Link
               href="/onboarding"
               className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
@@ -242,7 +479,9 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
               Welcome back, {user?.firstName || user?.username || "Student"}! 👋
             </h1>
-            <p className="mt-1 text-slate-600">Let's map out your academic success.</p>
+            <p className="mt-1 text-slate-600">
+              {planOverview?.strategy_summary || "Let's map out your academic success."}
+            </p>
           </div>
           <UserButton appearance={{ elements: { avatarBox: "h-12 w-12" } }} />
         </header>
@@ -275,7 +514,6 @@ export default function DashboardPage() {
           />
         </section>
 
-
         {/* Main Section */}
         {!hasPlan ? (
           /* Empty State Hero View */
@@ -286,17 +524,17 @@ export default function DashboardPage() {
                 <p className="mb-8 text-indigo-100">
                   Generate your first 7-day personalized academic schedule using Gemini AI. We will analyze your goals and available hours to build the perfect timetable.
                 </p>
-                <button 
-                  onClick={togglePlanState}
+                <Link 
+                  href="/onboarding"
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 cursor-pointer shadow-md"
                 >
                   <Sparkles className="h-5 w-5" />
                   Generate 7-Day Study Plan
-                </button>
+                </Link>
               </div>
             </div>
 
-            <div className="flex flex-col items-center justify-center rounded-2xl bg-white p-8 text-center shadow-sm">
+            <div className="flex flex-col items-center justify-center rounded-2xl bg-white p-8 text-center shadow-sm border border-slate-100">
               <div className="mb-4 rounded-full bg-slate-100 p-4">
                 <CalendarX2 className="h-8 w-8 text-slate-400" />
               </div>
@@ -345,7 +583,7 @@ export default function DashboardPage() {
 
               {/* 7-Day Navigation Tabs */}
               <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                {INITIAL_7_DAY_SCHEDULE.map((d) => {
+                {activeSchedule.map((d) => {
                   const dayTasks = d.tasks;
                   const dayDone = dayTasks.filter((t) => completedTaskIds.includes(t.id)).length;
                   const isAllDone = dayTasks.length > 0 && dayDone === dayTasks.length;
@@ -380,96 +618,140 @@ export default function DashboardPage() {
             </div>
 
             {/* Daily Schedule Task List */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                    <span>{currentDaySchedule.dayName} Schedule</span>
-                    <span className="text-xs font-medium text-slate-400">({currentDaySchedule.dateStr})</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {dayCompletedCount} of {dayTotalCount} tasks completed for today
-                  </p>
+            {currentDaySchedule && (
+              <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <span>{currentDaySchedule.dayName} Schedule</span>
+                      <span className="text-xs font-medium text-slate-400">({currentDaySchedule.dateStr})</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {dayCompletedCount} of {dayTotalCount} tasks completed for today
+                    </p>
+                  </div>
+                  
+                  {dayCompletedCount === dayTotalCount && dayTotalCount > 0 && (
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      Day Completed!
+                    </div>
+                  )}
                 </div>
-                
-                {dayCompletedCount === dayTotalCount && dayTotalCount > 0 && (
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    Day Completed!
+
+                {/* Task Cards Stack */}
+                <div className="space-y-3">
+                  {currentDaySchedule.tasks.map((task) => {
+                    const isCompleted = completedTaskIds.includes(task.id);
+
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => toggleTaskCompletion(task.id)}
+                        className={`group flex items-start gap-4 rounded-xl p-4 transition-all border cursor-pointer ${
+                          isCompleted
+                            ? "bg-slate-50 border-slate-200 opacity-75"
+                            : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
+                        }`}
+                      >
+                        {/* Stateful Checkbox */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleTaskCompletion(task.id);
+                          }}
+                          className="mt-0.5 shrink-0 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                          aria-label={isCompleted ? "Mark task as incomplete" : "Mark task as complete"}
+                        >
+                          {isCompleted ? (
+                            <CheckSquare className="h-6 w-6 text-indigo-600" />
+                          ) : (
+                            <Square className="h-6 w-6 text-slate-300 group-hover:text-slate-400" />
+                          )}
+                        </button>
+
+                        {/* Task Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md ${
+                                isCompleted
+                                  ? "bg-slate-200 text-slate-500 line-through"
+                                  : "bg-indigo-50 text-indigo-700"
+                              }`}
+                            >
+                              {task.subject}
+                            </span>
+
+                            <span className="text-xs font-medium text-slate-400">• {task.activity}</span>
+
+                            {/* Priority Badge */}
+                            <PriorityBadge priority={task.priority} isCompleted={isCompleted} />
+                          </div>
+
+                          <h4
+                            className={`mt-1.5 text-base font-semibold transition-colors ${
+                              isCompleted ? "text-slate-400 line-through" : "text-slate-900"
+                            }`}
+                          >
+                            {task.topic}
+                          </h4>
+                        </div>
+
+                        {/* Duration Tag */}
+                        <div className="flex shrink-0 items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                          <Clock className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{task.duration_minutes} mins</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Monthly Milestones & Study Tips Grid (when present in plan) */}
+            {(monthlyMilestones.length > 0 || studyTips.length > 0) && (
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {monthlyMilestones.length > 0 && (
+                  <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                      <Milestone className="h-5 w-5 text-indigo-600" />
+                      <h3 className="text-lg font-bold text-slate-900">Monthly Milestones</h3>
+                    </div>
+                    <div className="space-y-3">
+                      {monthlyMilestones.map((m, i) => (
+                        <div key={i} className="rounded-xl bg-slate-50 p-3.5 border border-slate-100">
+                          <div className="flex items-center gap-2 text-xs font-bold text-indigo-600 uppercase">
+                            <span>Week {m.week}</span>
+                          </div>
+                          <p className="mt-1 text-sm font-semibold text-slate-800">{m.milestone}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">Deliverable: {m.key_deliverable}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {studyTips.length > 0 && (
+                  <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                      <Lightbulb className="h-5 w-5 text-amber-500" />
+                      <h3 className="text-lg font-bold text-slate-900">AI Study Recommendations</h3>
+                    </div>
+                    <ul className="space-y-2.5 text-sm text-slate-600">
+                      {studyTips.map((tip, i) => (
+                        <li key={i} className="flex items-start gap-2 rounded-lg bg-amber-50/50 p-3 text-amber-900 border border-amber-100">
+                          <span className="text-amber-500 font-bold">•</span>
+                          <span>{tip}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
-
-              {/* Task Cards Stack */}
-              <div className="space-y-3">
-                {currentDaySchedule.tasks.map((task) => {
-                  const isCompleted = completedTaskIds.includes(task.id);
-
-                  return (
-                    <div
-                      key={task.id}
-                      onClick={() => toggleTaskCompletion(task.id)}
-                      className={`group flex items-start gap-4 rounded-xl p-4 transition-all border cursor-pointer ${
-                        isCompleted
-                          ? "bg-slate-50 border-slate-200 opacity-75"
-                          : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                      }`}
-                    >
-                      {/* Stateful Checkbox */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleTaskCompletion(task.id);
-                        }}
-                        className="mt-0.5 shrink-0 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                        aria-label={isCompleted ? "Mark task as incomplete" : "Mark task as complete"}
-                      >
-                        {isCompleted ? (
-                          <CheckSquare className="h-6 w-6 text-indigo-600" />
-                        ) : (
-                          <Square className="h-6 w-6 text-slate-300 group-hover:text-slate-400" />
-                        )}
-                      </button>
-
-                      {/* Task Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md ${
-                              isCompleted
-                                ? "bg-slate-200 text-slate-500 line-through"
-                                : "bg-indigo-50 text-indigo-700"
-                            }`}
-                          >
-                            {task.subject}
-                          </span>
-
-                          <span className="text-xs font-medium text-slate-400">• {task.activity}</span>
-
-                          {/* Priority Badge */}
-                          <PriorityBadge priority={task.priority} isCompleted={isCompleted} />
-                        </div>
-
-                        <h4
-                          className={`mt-1.5 text-base font-semibold transition-colors ${
-                            isCompleted ? "text-slate-400 line-through" : "text-slate-900"
-                          }`}
-                        >
-                          {task.topic}
-                        </h4>
-                      </div>
-
-                      {/* Duration Tag */}
-                      <div className="flex shrink-0 items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
-                        <Clock className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{task.duration_minutes} mins</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            )}
 
           </section>
         )}
@@ -591,3 +873,4 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
     </main>
   );
 }
+
