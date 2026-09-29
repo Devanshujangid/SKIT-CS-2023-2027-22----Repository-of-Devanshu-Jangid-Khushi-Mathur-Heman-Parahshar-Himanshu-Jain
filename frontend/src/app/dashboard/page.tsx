@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useUser, useAuth, UserButton } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
 import { 
@@ -21,7 +22,8 @@ import {
   Wifi,
   AlertCircle,
   Lightbulb,
-  Milestone
+  Milestone,
+  Loader2
 } from "lucide-react";
 
 interface StatCardProps {
@@ -223,6 +225,7 @@ const INITIAL_7_DAY_SCHEDULE: ScheduleDay[] = [
 ];
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, isLoaded: isUserLoaded } = useUser();
   const { getToken, isLoaded: isAuthLoaded, isSignedIn } = useAuth();
 
@@ -241,6 +244,10 @@ export default function DashboardPage() {
   const [isFetchingPlans, setIsFetchingPlans] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isLiveSynced, setIsLiveSynced] = useState<boolean>(false);
+
+  // AI Plan Generation State
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   // Load completed tasks & saved user profile from localStorage
   useEffect(() => {
@@ -330,6 +337,68 @@ export default function DashboardPage() {
     } finally {
       setIsFetchingPlans(false);
       setIsLoading(false);
+    }
+  };
+
+  // Call Khushi's POST /api/v1/ai/generate-plan endpoint to generate new 7-Day Study Plan with Gemini AI
+  const handleGeneratePlan = async () => {
+    // Prevent duplicate triggers if generation is already in progress
+    if (isGeneratingPlan) return;
+
+    setIsGeneratingPlan(true);
+    setGenerationError(null);
+
+    try {
+      const token = await getToken();
+
+      // Build onboarding data payload using saved userProfile or intelligent fallbacks
+      const onboardingData = {
+        semester: userProfile?.semester ? Number(userProfile.semester) : 1,
+        study_hours_per_day: userProfile?.study_hours_per_day ? Number(userProfile.study_hours_per_day) : 4,
+        goals: userProfile?.goals 
+          ? (Array.isArray(userProfile.goals) ? userProfile.goals : [userProfile.goals])
+          : ["Master core academic subjects and maintain high academic performance"],
+        subjects: userProfile?.subjects && userProfile.subjects.length > 0
+          ? userProfile.subjects
+          : ["Data Structures", "Operating Systems", "Computer Networks"],
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/ai/generate-plan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ onboarding_data: onboardingData }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let detail = `Server returned status ${response.status}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.detail) detail = parsed.detail;
+        } catch {
+          if (errorText) detail = errorText;
+        }
+        throw new Error(detail);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Automatically fetch live plans to render new interactive schedule grid
+        await fetchPlans();
+      } else {
+        throw new Error("Plan generation completed but response payload was invalid.");
+      }
+    } catch (err: any) {
+      console.error("Failed to generate AI study plan:", err);
+      const errMsg = err.message || "Failed to generate AI study plan. Please try again.";
+      setGenerationError(errMsg);
+      alert(`Error generating AI plan: ${errMsg}`);
+    } finally {
+      setIsGeneratingPlan(false);
     }
   };
 
@@ -524,13 +593,30 @@ export default function DashboardPage() {
                 <p className="mb-8 text-indigo-100">
                   Generate your first 7-day personalized academic schedule using Gemini AI. We will analyze your goals and available hours to build the perfect timetable.
                 </p>
-                <Link 
-                  href="/onboarding"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 cursor-pointer shadow-md"
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (!userProfile || !userProfile.subjects || userProfile.subjects.length === 0) {
+                      router.push("/onboarding");
+                    } else {
+                      handleGeneratePlan();
+                    }
+                  }}
+                  disabled={isGeneratingPlan}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 cursor-pointer shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Sparkles className="h-5 w-5" />
-                  Generate 7-Day Study Plan
-                </Link>
+                  {isGeneratingPlan ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                      <span>Generating your plan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-5 w-5" />
+                      <span>Generate 7-Day Study Plan</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -552,9 +638,31 @@ export default function DashboardPage() {
             <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-6 w-6 text-indigo-600" />
-                    <h2 className="text-xl font-bold text-slate-900">7-Day Interactive Academic Schedule</h2>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-6 w-6 text-indigo-600" />
+                      <h2 className="text-xl font-bold text-slate-900">7-Day Interactive Academic Schedule</h2>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGeneratePlan}
+                      disabled={isGeneratingPlan}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                      title="Generate a fresh 7-day schedule using Gemini AI"
+                    >
+                      {isGeneratingPlan ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                          <span>Generating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>Regenerate AI Plan</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                   <p className="mt-1 text-sm text-slate-500">
                     Track your daily study tasks. Check off topics as you complete them.
@@ -757,6 +865,28 @@ export default function DashboardPage() {
         )}
 
       </div>
+
+      {/* High Visibility Generating Plan Loading Modal Overlay */}
+      {isGeneratingPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="flex max-w-md flex-col items-center rounded-2xl bg-white p-8 text-center shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
+            <div className="relative mb-4 flex items-center justify-center">
+              <div className="absolute h-16 w-16 animate-ping rounded-full bg-indigo-100 opacity-75"></div>
+              <div className="relative rounded-full bg-indigo-600 p-4 text-white shadow-lg">
+                <Sparkles className="h-8 w-8 animate-spin" />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold text-slate-900">Generating Your AI Study Plan</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Gemini AI is analyzing your goals, subjects, and daily hours to build an optimized 7-day academic schedule...
+            </p>
+            <div className="mt-6 flex items-center gap-2 rounded-xl bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-600 border border-indigo-100">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Generating plan... Please wait</span>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -5,13 +5,14 @@ import { useAuth, useUser, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
-import { Sparkles, ArrowRight, BookOpen, Clock, Target, CheckCircle2 } from "lucide-react";
+import { Sparkles, ArrowRight, BookOpen, Clock, Target, Loader2 } from "lucide-react";
 
 export default function OnboardingPage() {
   const { getToken } = useAuth();
   const { user, isLoaded: isUserLoaded } = useUser();
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   
   const [formData, setFormData] = useState({
     semester: "",
@@ -44,7 +45,10 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || isGeneratingPlan) return;
+
     setIsSubmitting(true);
+    setIsGeneratingPlan(true);
 
     const payload = {
       semester: parseInt(formData.semester) || 1,
@@ -63,24 +67,62 @@ export default function OnboardingPage() {
     try {
       const token = await getToken();
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/profile`, {
+      // 1. Save profile to backend /api/v1/profile
+      const profileRes = await fetch(`${API_BASE_URL}/api/v1/profile`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        console.warn("Backend profile save API returned non-200, continuing with local profile.");
+      if (!profileRes.ok) {
+        console.warn("Backend profile save API returned non-200, continuing with plan generation.");
       }
-    } catch (error) {
-      console.error("Error submitting profile to backend API:", error);
-    } finally {
-      setIsSubmitting(false);
-      // Seamless navigation to dashboard
+
+      // 2. Generate 7-Day Study Plan with Khushi's endpoint POST /api/v1/ai/generate-plan
+      const aiRes = await fetch(`${API_BASE_URL}/api/v1/ai/generate-plan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          onboarding_data: {
+            semester: payload.semester,
+            study_hours_per_day: payload.study_hours_per_day,
+            goals: payload.goals,
+            subjects: payload.subjects,
+          },
+        }),
+      });
+
+      if (!aiRes.ok) {
+        const errorText = await aiRes.text();
+        let detail = `Server status ${aiRes.status}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.detail) detail = parsed.detail;
+        } catch {
+          if (errorText) detail = errorText;
+        }
+        throw new Error(detail);
+      }
+
+      const aiData = await aiRes.json();
+      if (!aiData.success) {
+        throw new Error("AI Plan Generation failed to return success status.");
+      }
+
+      // Navigate to dashboard where fetchPlans() auto-loads the new plan
       router.push("/dashboard");
+    } catch (error: any) {
+      console.error("Error generating AI plan on onboarding submit:", error);
+      const msg = error.message || "Failed to generate AI study plan. Please try again.";
+      alert(`Error generating study plan: ${msg}`);
+      setIsSubmitting(false);
+      setIsGeneratingPlan(false);
     }
   };
 
@@ -134,9 +176,10 @@ export default function OnboardingPage() {
                   required
                   min="1"
                   max="10"
+                  disabled={isSubmitting || isGeneratingPlan}
                   value={formData.semester}
                   onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
                   placeholder="e.g., 5"
                 />
               </div>
@@ -155,9 +198,10 @@ export default function OnboardingPage() {
                   required
                   min="0.5"
                   max="18"
+                  disabled={isSubmitting || isGeneratingPlan}
                   value={formData.study_hours_per_day}
                   onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
                   placeholder="e.g., 4.5"
                 />
               </div>
@@ -173,9 +217,10 @@ export default function OnboardingPage() {
               <textarea
                 name="goals"
                 required
+                disabled={isSubmitting || isGeneratingPlan}
                 value={formData.goals}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
                 placeholder="e.g., Maintain 9.0 CGPA and master backend microservices architecture"
                 rows={3}
               />
@@ -189,9 +234,10 @@ export default function OnboardingPage() {
                 type="text"
                 name="subjects"
                 required
+                disabled={isSubmitting || isGeneratingPlan}
                 value={formData.subjects}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-xl border border-slate-200 p-3 text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
                 placeholder="Operating Systems, Computer Networks, Data Structures"
               />
             </div>
@@ -199,14 +245,17 @@ export default function OnboardingPage() {
             <div className="mt-2 flex flex-col sm:flex-row items-center justify-between gap-4">
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-8 py-3 font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50 cursor-pointer shadow-md"
+                disabled={isSubmitting || isGeneratingPlan}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-8 py-3 font-semibold text-white transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md"
               >
-                {isSubmitting ? (
-                  "Saving Profile..."
+                {isSubmitting || isGeneratingPlan ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Generating 7-Day Plan...</span>
+                  </>
                 ) : (
                   <>
-                    Save Profile & Go to Dashboard
+                    Save Profile & Generate 7-Day Plan
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -222,7 +271,30 @@ export default function OnboardingPage() {
           </form>
         </div>
 
+        {/* High Visibility Generating Plan Loading Modal Overlay */}
+        {(isSubmitting || isGeneratingPlan) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+            <div className="flex max-w-md flex-col items-center rounded-2xl bg-white p-8 text-center shadow-2xl border border-slate-100">
+              <div className="relative mb-4 flex items-center justify-center">
+                <div className="absolute h-16 w-16 animate-ping rounded-full bg-indigo-100 opacity-75"></div>
+                <div className="relative rounded-full bg-indigo-600 p-4 text-white shadow-lg">
+                  <Sparkles className="h-8 w-8 animate-spin" />
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">Generating Your AI Study Plan</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Saving profile & prompting Gemini AI to craft your personalized 7-day academic schedule...
+              </p>
+              <div className="mt-6 flex items-center gap-2 rounded-xl bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-600 border border-indigo-100">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Redirecting to Dashboard once ready...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </main>
   );
-}
+}
+
