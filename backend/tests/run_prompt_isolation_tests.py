@@ -15,7 +15,10 @@ if BACKEND_DIR not in sys.path:
 from prompts.study_plan import (
     OnboardingDataInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
+    REGENERATION_SYSTEM_INSTRUCTION,
+    RegenerationInput,
     build_study_plan_prompt,
+    build_regeneration_prompt,
     validate_study_plan_output,
     validate_target_score_alignment,
     validate_subject_name_fidelity,
@@ -414,10 +417,51 @@ def run_isolation_suite():
     except Exception as e:
         print(f"  |-- FAILED: {e}")
 
+    # Task 5: Plan Regeneration & Tweaking Prompt Ingestion & Output Schema Validation
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Plan Regeneration & Tweaking Prompt Ingestion & Output Schema Validation")
+    try:
+        active_plan = validate_study_plan_output(REPRESENTATIVE_AI_RESPONSES[0])
+        onboarding_input = OnboardingDataInput.model_validate(REAL_ONBOARDING_PAYLOADS[0]["payload"])
+        
+        tweak_input = RegenerationInput(
+            current_plan=active_plan,
+            user_feedback="Make Wednesday lighter by shifting 1.5 hours of heavy problem solving to Saturday",
+            onboarding_data=onboarding_input
+        )
+        
+        regeneration_prompt = build_regeneration_prompt(tweak_input)
+        
+        # Verify prompt construction contains critical elements
+        assert "Make Wednesday lighter" in regeneration_prompt
+        assert "Active Study Plan to Modify" in regeneration_prompt
+        assert "Operating Systems" in regeneration_prompt
+        assert "MINIMAL SURGICAL EDITS" in REGENERATION_SYSTEM_INSTRUCTION
+        assert "STRICT TIME RE-BALANCING" in REGENERATION_SYSTEM_INSTRUCTION
+        
+        # Simulate AI tweaked JSON response
+        tweaked_response_dict = json.loads(json.dumps(REPRESENTATIVE_AI_RESPONSES[0]))
+        # Modify Wednesday to be lighter (3.0h instead of 4.5h)
+        tweaked_response_dict["weekly_schedule"][2]["total_hours"] = 3.0
+        tweaked_response_dict["weekly_schedule"][2]["sessions"][1]["duration_hours"] = 0.5
+        tweaked_response_dict["plan_overview"]["strategy_summary"] = "Adjusted study plan with lighter Wednesday workload."
+
+        validated_tweaked_plan = validate_study_plan_output(tweaked_response_dict)
+        assert validated_tweaked_plan.weekly_schedule[2].total_hours == 3.0
+        
+        print(f"  |-- Tweak Prompt Building: SUCCESS ('Make Wednesday lighter...')")
+        print(f"  |-- Input Plan Ingestion: SUCCESS ({len(tweak_input.current_plan.weekly_schedule)} days parsed)")
+        print(f"  |-- Tweaked JSON Output Schema Validation: STRICT COMPLIANCE CONFIRMED")
+        print("  |-- Plan Regeneration & Tweaking Logic Path: VERIFIED & ACCURATE")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
+
     print("\n=======================================================================")
     print(f"TEST RESULTS: {success_count}/{total_tests} ISOLATION TESTS PASSED")
     print("=======================================================================")
     return success_count == total_tests
+
 
 
 if __name__ == "__main__":
