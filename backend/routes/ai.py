@@ -29,6 +29,8 @@ router = APIRouter(prefix="/api/v1/ai", tags=["AI"])
 
 logger = logging.getLogger(__name__)
 
+generation_status = {}
+
 
 # -----------------------------
 # Request Models
@@ -185,28 +187,62 @@ def generate_and_save_plan(
     clerk_id: str
 ):
     try:
+        print(">>> BACKGROUND TASK STARTED", flush=True)
         logger.info("Background study plan generation started")
+
+        generation_status[clerk_id] = "generating"
 
         response_text = generate_gemini_response(
             prompt=user_prompt,
             system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
         )
 
+        print(">>> GEMINI RESPONSE RECEIVED", flush=True)
+
         raw_plan = extract_json(response_text)
         validated_plan = validate_study_plan_output(raw_plan)
+        print(">>> PLAN VALIDATED", flush=True)
 
         save_study_plan(
             clerk_id=clerk_id,
             plan_data=validated_plan.model_dump()
         )
-
-        logger.info("Background study plan generation completed successfully")
+        print(">>> PLAN SAVED TO DATABASE", flush=True)
+        generation_status[clerk_id] = "completed"
+        logger.info(
+            "Background study plan generation completed successfully"
+        )
 
     except Exception:
+        generation_status[clerk_id] = "failed"
+
         logger.exception(
             "Background study plan generation failed"
         )
 
+
+# -----------------------------
+# Generation Status Endpoint
+# -----------------------------
+
+@router.get("/generation-status")
+async def get_generation_status(
+    user_data: dict = Depends(verify_clerk_token)
+):
+    clerk_id = user_data.get("sub")
+
+    if not clerk_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user Clerk ID is missing"
+        )
+
+    status = generation_status.get(clerk_id, "not_started")
+
+    return {
+        "success": True,
+        "status": status
+    }
 # -----------------------------
 # Test Endpoint
 # -----------------------------
