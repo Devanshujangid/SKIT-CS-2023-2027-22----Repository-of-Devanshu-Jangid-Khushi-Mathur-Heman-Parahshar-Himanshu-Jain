@@ -18,7 +18,10 @@ from prompts.study_plan import (
     OnboardingDataInput,
     SubjectInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
+    REGENERATION_SYSTEM_INSTRUCTION,
+    RegenerationInput,
     build_study_plan_prompt,
+    build_regeneration_prompt,
     validate_study_plan_output,
     validate_target_score_alignment,
     validate_subject_name_fidelity,
@@ -407,7 +410,81 @@ class TestEdgeCaseSubjectFidelity(unittest.TestCase):
         self.assertEqual(report["unmatched_sessions"][0]["subject"], "Quantum Computing")
 
 
+class TestRegenerationPromptAndSchema(unittest.TestCase):
+    """
+    Tests study plan regeneration request validation and prompt generation.
+    """
+
+    def setUp(self):
+        self.sample_plan = StudyPlanOutputSchema.model_validate({
+            "plan_overview": {
+                "student_semester": 5,
+                "daily_target_hours": 4.0,
+                "weekly_total_hours": 28.0,
+                "primary_focus": "Score > 9.0 CGPA",
+                "strategy_summary": "Balanced daily coverage."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Wednesday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Virtual Memory",
+                            "duration_hours": 2.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high"
+                        },
+                        {
+                            "subject": "Computer Networks",
+                            "topic": "TCP/IP Protocol",
+                            "duration_hours": 2.0,
+                            "activity_type": "practice_problems",
+                            "priority": "medium"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Complete OS & Networks review",
+                    "key_deliverable": "Score 90%+ on practice quiz"
+                }
+            ],
+            "study_tips": ["Take 10 min breaks."]
+        })
+
+    def test_regeneration_input_valid(self):
+        input_data = RegenerationInput(
+            current_plan=self.sample_plan,
+            user_feedback="Make Wednesday lighter"
+        )
+        self.assertEqual(input_data.user_feedback, "Make Wednesday lighter")
+        self.assertEqual(input_data.current_plan.plan_overview.daily_target_hours, 4.0)
+
+    def test_regeneration_input_empty_feedback_raises_error(self):
+        with self.assertRaises(ValidationError):
+            RegenerationInput(
+                current_plan=self.sample_plan,
+                user_feedback="   "
+            )
+
+    def test_regeneration_prompt_construction(self):
+        input_data = RegenerationInput(
+            current_plan=self.sample_plan,
+            user_feedback="Make Wednesday lighter"
+        )
+        prompt = build_regeneration_prompt(input_data)
+        self.assertIn('Make Wednesday lighter', prompt)
+        self.assertIn('Operating Systems', prompt)
+        self.assertIn('MINIMAL SURGICAL EDITS', REGENERATION_SYSTEM_INSTRUCTION)
+        self.assertIn('STRICT TIME RE-BALANCING', REGENERATION_SYSTEM_INSTRUCTION)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

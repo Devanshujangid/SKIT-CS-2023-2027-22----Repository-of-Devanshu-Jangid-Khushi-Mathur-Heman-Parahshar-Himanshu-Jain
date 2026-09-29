@@ -97,6 +97,33 @@ def validate_study_plan_output(data: dict) -> StudyPlanOutputSchema:
     return StudyPlanOutputSchema.model_validate(data)
 
 
+# ---------------------------------------------------------------------------
+# Regeneration / Plan Refinement Schemas & Prompts
+# ---------------------------------------------------------------------------
+
+class RegenerationInput(BaseModel):
+    current_plan: StudyPlanOutputSchema = Field(
+        ...,
+        description="The active study plan object to be modified"
+    )
+    user_feedback: str = Field(
+        ...,
+        description="User tweak or adaptation request (e.g., 'Make Wednesday lighter')"
+    )
+    onboarding_data: Optional[OnboardingDataInput] = Field(
+        None,
+        description="Original onboarding student profile constraints (subjects, daily hours limit, semester, goals)"
+    )
+
+    @field_validator("user_feedback")
+    @classmethod
+    def validate_user_feedback_not_empty(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("user_feedback cannot be empty")
+        return value.strip()
+
+
+
 STUDY_PLAN_SYSTEM_INSTRUCTION = """
 You are an expert AI Academic Coach and Study Planner.
 Your task is to convert student onboarding information into a deterministic, highly structured, 7-day personalized study plan.
@@ -249,6 +276,97 @@ def validate_subject_name_fidelity(
         "unmatched_sessions": unmatched_sessions,
         "missing_enrolled_subjects": list(missing_enrolled),
     }
+
+
+REGENERATION_SYSTEM_INSTRUCTION = """
+You are an expert AI Academic Coach and Study Planner specializing in personalized study schedule adaptation.
+Your task is to modify an existing 7-day personalized study plan based on a user's specific tweak request (e.g., "Make Wednesday lighter", "Add 2 hours of revision on Saturday").
+
+CRITICAL INSTRUCTIONS:
+1. OUTPUT FORMAT: Respond ONLY with a valid, raw JSON object adhering strictly to the JSON schema specified below.
+2. DO NOT include markdown wrappers (such as ```json or ```), preamble, or postscript text.
+3. MINIMAL SURGICAL EDITS: Modify only the necessary days, sessions, or parameters required to satisfy the user's tweak request. Maintain overall schedule balance and structure without rewriting unimpacted days unnecessarily.
+4. STRICT TIME RE-BALANCING:
+   - Recalculate `total_hours` for each day as the exact sum of `duration_hours` of its sessions.
+   - The total hours for any day MUST NOT exceed the student's daily study hours limit.
+   - Recalculate `weekly_total_hours` in `plan_overview` to accurately reflect the updated 7-day total.
+5. SUBJECT FIDELITY & NO HALLUCINATION: In `weekly_schedule`, session `subject` fields MUST use the EXACT subject name strings from the original plan or onboarding profile. DO NOT invent, alter, or abbreviate subject names.
+6. TARGET SCORE & MILESTONE INTEGRITY: Preserve dynamic exam revision milestones (`monthly_milestones`) and key deliverables aligned with target scores unless specifically asked to change them.
+7. DETERMINISTIC METRICS: Ensure `activity_type` uses only ('core_concept_study', 'practice_problems', 'lecture_review', 'revision_quiz') and `priority` uses only ('high', 'medium', 'low').
+
+JSON SCHEMA SPECIFICATION:
+{
+  "plan_overview": {
+    "student_semester": number,
+    "daily_target_hours": number,
+    "weekly_total_hours": number,
+    "primary_focus": string,
+    "strategy_summary": string
+  },
+  "weekly_schedule": [
+    {
+      "day": "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday",
+      "total_hours": number,
+      "sessions": [
+        {
+          "subject": string,
+          "topic": string,
+          "duration_hours": number,
+          "activity_type": "core_concept_study" | "practice_problems" | "lecture_review" | "revision_quiz",
+          "priority": "high" | "medium" | "low"
+        }
+      ]
+    }
+  ],
+  "monthly_milestones": [
+    {
+      "week": number,
+      "milestone": string,
+      "key_deliverable": string
+    }
+  ],
+  "study_tips": [string]
+}
+"""
+
+
+def build_regeneration_prompt(data: RegenerationInput) -> str:
+    """
+    Constructs the deterministic user prompt for study plan regeneration/refinement
+    containing the current active plan, student context, and tweak request.
+    """
+    plan_json = json.dumps(data.current_plan.model_dump(), indent=2)
+
+    context_str = ""
+    if data.onboarding_data:
+        subjects_formatted = json.dumps([s.model_dump() for s in data.onboarding_data.subjects], indent=2)
+        goals_formatted = json.dumps(data.onboarding_data.goals, indent=2)
+        context_str = f"""
+Student Onboarding Profile Constraints:
+- Semester: {data.onboarding_data.semester}
+- Available Daily Study Hours Limit: {data.onboarding_data.study_hours_per_day} hours/day
+- Goals: {goals_formatted}
+- Enrolled Subjects & Specific Target Scores:
+{subjects_formatted}
+"""
+
+    prompt = f"""
+Active Study Plan to Modify:
+{plan_json}
+{context_str}
+User Tweak Request:
+"{data.user_feedback}"
+
+Please update the active study plan according to the user tweak request and system instructions.
+CRITICAL REQUIREMENTS:
+- Apply targeted modifications to honor "{data.user_feedback}".
+- Recalculate daily `total_hours` for all modified days so they equal the sum of session durations, without exceeding daily available study hours limits.
+- Update `weekly_total_hours` in `plan_overview` to match the new sum across all 7 days.
+- Maintain EXACT subject names (do not alter course codes, numbers, or special characters).
+- Respond ONLY with valid, raw JSON matching the required schema.
+"""
+    return prompt.strip()
+
 
 
 
