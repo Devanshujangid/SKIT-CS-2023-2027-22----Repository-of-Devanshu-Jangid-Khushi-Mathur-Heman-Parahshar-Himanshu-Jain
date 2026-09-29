@@ -49,3 +49,59 @@ users
   │
   └── study_plans
           ON DELETE CASCADE
+
+
+
+---
+
+## Task 4 – Implement Supabase Row Level Security (RLS) for Study Plans
+
+### Work Done
+
+- Enabled Row Level Security (RLS) on the `study_plans` table in Supabase.
+- Created an RLS policy to allow students to SELECT only their own study plans.
+- Created an RLS policy to allow students to INSERT only study plans matching their own `user_id`.
+- Created an RLS policy to allow students to UPDATE only their own study plans.
+- Configured the UPDATE policy with both `USING` and `WITH CHECK` conditions to prevent unauthorized ownership changes.
+- Verified that all three RLS policies were successfully created.
+- Verified that Row Level Security is enabled on the `study_plans` table.
+
+### RLS Policies
+
+```sql
+-- SELECT
+CREATE POLICY "Students can view their own study plans"
+ON public.study_plans
+FOR SELECT
+TO authenticated
+USING (
+    auth.uid() = user_id
+);
+
+-- INSERT
+CREATE POLICY "Students can insert their own study plans"
+ON public.study_plans
+FOR INSERT
+TO authenticated
+WITH CHECK (
+    auth.uid() = user_id
+);
+
+-- UPDATE
+CREATE POLICY "Students can update their own study plans"
+ON public.study_plans
+FOR UPDATE
+TO authenticated
+USING (
+    auth.uid() = user_id
+)
+WITH CHECK (
+    auth.uid() = user_id
+);
+
+RLS Enabled: true
+
+Policies Verified:
+- SELECT → auth.uid() = user_id
+- INSERT → auth.uid() = user_id
+- UPDATE → auth.uid() = user_id
