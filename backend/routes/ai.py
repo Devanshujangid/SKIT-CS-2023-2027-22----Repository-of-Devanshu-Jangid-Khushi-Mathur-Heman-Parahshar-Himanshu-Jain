@@ -312,7 +312,6 @@ async def generate_study_plan(
             "success": True,
             "message": "Study plan generation started",
             "model": model,
-            
         }
 
     except Exception as exc:
