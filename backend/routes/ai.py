@@ -4,11 +4,11 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
@@ -16,8 +16,12 @@ from google.genai import types
 from prompts.study_plan import (
     OnboardingDataInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
+    REGENERATION_SYSTEM_INSTRUCTION,
+    RegenerationInput,
     build_study_plan_prompt,
+    build_regeneration_prompt,
     validate_study_plan_output,
+    StudyPlanOutputSchema,
 )
 from auth import verify_clerk_token
 from database import save_study_plan
@@ -42,6 +46,22 @@ class TestPromptRequest(BaseModel):
 
 class GeneratePlanRequest(BaseModel):
     onboarding_data: OnboardingDataInput
+
+
+class RegeneratePlanRequest(BaseModel):
+    current_plan: StudyPlanOutputSchema = Field(
+        ...,
+        description="The previous study plan's JSON object history to be used as context"
+    )
+    user_feedback: str = Field(
+        ...,
+        description="User's prompt instruction for tweaking or updating the plan (e.g., 'Make Wednesday lighter')"
+    )
+    onboarding_data: Optional[OnboardingDataInput] = Field(
+        None,
+        description="Optional student onboarding profile context"
+    )
+
 
 
 # -----------------------------
@@ -184,7 +204,8 @@ def extract_json(text: str) -> Dict[str, Any]:
 
 def generate_and_save_plan(
     user_prompt: str,
-    clerk_id: str
+    clerk_id: str,
+    system_instruction: str = STUDY_PLAN_SYSTEM_INSTRUCTION
 ):
     try:
         print(">>> BACKGROUND TASK STARTED", flush=True)
@@ -194,7 +215,7 @@ def generate_and_save_plan(
 
         response_text = generate_gemini_response(
             prompt=user_prompt,
-            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
+            system_instruction=system_instruction
         )
 
         print(">>> GEMINI RESPONSE RECEIVED", flush=True)
@@ -297,7 +318,6 @@ async def generate_study_plan(
             "success": True,
             "message": "Study plan generation started",
             "model": model,
-            
         }
 
     except Exception as exc:
@@ -307,3 +327,58 @@ async def generate_study_plan(
             status_code=500,
             detail=str(exc)
         )
+
+
+# -----------------------------
+# Regenerate / Tweak Study Plan Endpoint
+# -----------------------------
+
+@router.post("/regenerate-plan")
+@router.post("/tweak-plan")
+async def regenerate_study_plan(
+    request: RegeneratePlanRequest,
+    background_tasks: BackgroundTasks,
+    user_data: dict = Depends(verify_clerk_token)
+):
+    """
+    Refines an existing study plan by passing the previous plan's JSON history
+    as context to Gemini alongside the user's prompt instruction.
+    """
+    try:
+        clerk_id = user_data.get("sub")
+
+        if not clerk_id:
+            raise RuntimeError("Authenticated user Clerk ID is missing")
+
+        # Construct RegenerationInput context combining current plan history and user tweak feedback
+        regeneration_input = RegenerationInput(
+            current_plan=request.current_plan,
+            user_feedback=request.user_feedback,
+            onboarding_data=request.onboarding_data
+        )
+
+        user_prompt = build_regeneration_prompt(regeneration_input)
+        model = get_target_model()
+
+        # Add background task to regenerate and save the refined study plan
+        background_tasks.add_task(
+            generate_and_save_plan,
+            user_prompt=user_prompt,
+            clerk_id=clerk_id,
+            system_instruction=REGENERATION_SYSTEM_INSTRUCTION
+        )
+
+        return {
+            "success": True,
+            "message": "Study plan regeneration started",
+            "model": model,
+        }
+
+    except Exception as exc:
+        logger.exception("Study plan regeneration failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
+
