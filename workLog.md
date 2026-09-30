@@ -105,3 +105,84 @@ Policies Verified:
 - SELECT → auth.uid() = user_id
 - INSERT → auth.uid() = user_id
 - UPDATE → auth.uid() = user_id
+
+
+
+---
+
+## Task 5 – Apply and Verify RLS Policies on Student Profiles
+
+### Work Done
+
+- Enabled Row Level Security (RLS) on the `student_profiles` table.
+- Implemented a SELECT policy to allow students to access only their own profile.
+- Implemented an INSERT policy to allow students to create only their own profile.
+- Implemented an UPDATE policy to allow students to modify only their own profile.
+- Used the Clerk user identity from the authenticated JWT to identify the corresponding application user.
+- Enforced ownership through the relationship:
+  `Clerk sub → users.clerk_id → users.id → student_profiles.user_id`.
+- Configured the UPDATE policy with both `USING` and `WITH CHECK` conditions to prevent unauthorized ownership changes.
+- Verified all three RLS policies using PostgreSQL policy metadata.
+- Verified that RLS is enabled on the `student_profiles` table.
+
+### RLS Policies
+
+```sql
+-- SELECT
+CREATE POLICY "Students can view their own profile"
+ON public.student_profiles
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.users
+        WHERE users.id = student_profiles.user_id
+          AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
+    )
+);
+
+-- INSERT
+CREATE POLICY "Students can insert their own profile"
+ON public.student_profiles
+FOR INSERT
+TO authenticated
+WITH CHECK (
+    EXISTS (
+        SELECT 1
+        FROM public.users
+        WHERE users.id = student_profiles.user_id
+          AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
+    )
+);
+
+-- UPDATE
+CREATE POLICY "Students can update their own profile"
+ON public.student_profiles
+FOR UPDATE
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.users
+        WHERE users.id = student_profiles.user_id
+          AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
+    )
+)
+WITH CHECK (
+    EXISTS (
+        SELECT 1
+        FROM public.users
+        WHERE users.id = student_profiles.user_id
+          AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
+    )
+);
+
+
+
+RLS Enabled: true
+
+Policies Verified:
+- SELECT → own profile only
+- INSERT → own profile only
+- UPDATE → own profile only
