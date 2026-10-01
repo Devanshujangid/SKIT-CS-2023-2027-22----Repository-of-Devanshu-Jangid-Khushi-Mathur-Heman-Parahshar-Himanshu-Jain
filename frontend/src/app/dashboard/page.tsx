@@ -152,78 +152,6 @@ function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[
   });
 }
 
-// 7-Day Sample Academic Schedule Data (Fallback/Initial)
-const INITIAL_7_DAY_SCHEDULE: ScheduleDay[] = [
-  {
-    dayNumber: 1,
-    dayName: "Monday",
-    dateStr: "Day 1",
-    tasks: [
-      { id: "d1-t1", subject: "Data Structures", topic: "B-Trees & AVL Tree Rotations", activity: "Core Concept Study", duration_minutes: 90, priority: "high" },
-      { id: "d1-t2", subject: "Operating Systems", topic: "Process Synchronization & Semaphores", activity: "Lecture Review", duration_minutes: 60, priority: "high" },
-      { id: "d1-t3", subject: "Computer Networks", topic: "TCP/IP 3-Way Handshake & Framing", activity: "Practice Problems", duration_minutes: 45, priority: "medium" },
-    ],
-  },
-  {
-    dayNumber: 2,
-    dayName: "Tuesday",
-    dateStr: "Day 2",
-    tasks: [
-      { id: "d2-t1", subject: "Data Structures", topic: "Graph Traversal (BFS & DFS)", activity: "Practice Problems", duration_minutes: 75, priority: "high" },
-      { id: "d2-t2", subject: "Database Systems", topic: "SQL Joins & Indexing B+ Trees", activity: "Core Concept Study", duration_minutes: 60, priority: "medium" },
-      { id: "d2-t3", subject: "Theory of Computation", topic: "DFA & NFA Conversions", activity: "Revision Quiz", duration_minutes: 45, priority: "low" },
-    ],
-  },
-  {
-    dayNumber: 3,
-    dayName: "Wednesday",
-    dateStr: "Day 3",
-    tasks: [
-      { id: "d3-t1", subject: "Operating Systems", topic: "Virtual Memory & Page Replacement", activity: "Core Concept Study", duration_minutes: 90, priority: "high" },
-      { id: "d3-t2", subject: "Computer Networks", topic: "IP Subnetting & CIDR Notation", activity: "Practice Problems", duration_minutes: 60, priority: "medium" },
-      { id: "d3-t3", subject: "Software Engineering", topic: "Agile Scrum & SDLC Models", activity: "Lecture Review", duration_minutes: 30, priority: "low" },
-    ],
-  },
-  {
-    dayNumber: 4,
-    dayName: "Thursday",
-    dateStr: "Day 4",
-    tasks: [
-      { id: "d4-t1", subject: "Data Structures", topic: "Dynamic Programming & Knapsack", activity: "Core Concept Study", duration_minutes: 90, priority: "high" },
-      { id: "d4-t2", subject: "Database Systems", topic: "ACID Properties & Transactions", activity: "Lecture Review", duration_minutes: 60, priority: "medium" },
-      { id: "d4-t3", subject: "Operating Systems", topic: "Deadlock Detection & Banker's Algorithm", activity: "Practice Problems", duration_minutes: 45, priority: "high" },
-    ],
-  },
-  {
-    dayNumber: 5,
-    dayName: "Friday",
-    dateStr: "Day 5",
-    tasks: [
-      { id: "d5-t1", subject: "Computer Networks", topic: "HTTP/2 vs HTTP/3 & TLS Handshake", activity: "Core Concept Study", duration_minutes: 60, priority: "medium" },
-      { id: "d5-t2", subject: "Theory of Computation", topic: "Context-Free Grammars & Pushdown Automata", activity: "Practice Problems", duration_minutes: 75, priority: "high" },
-      { id: "d5-t3", subject: "Data Structures", topic: "Heap Sort & Priority Queues", activity: "Revision Quiz", duration_minutes: 45, priority: "medium" },
-    ],
-  },
-  {
-    dayNumber: 6,
-    dayName: "Saturday",
-    dateStr: "Day 6",
-    tasks: [
-      { id: "d6-t1", subject: "Full Stack Lab", topic: "Building REST APIs with FastAPI & Next.js", activity: "Hands-on Project", duration_minutes: 120, priority: "high" },
-      { id: "d6-t2", subject: "Operating Systems", topic: "Weekly OS Concept Quiz", activity: "Revision Quiz", duration_minutes: 45, priority: "medium" },
-    ],
-  },
-  {
-    dayNumber: 7,
-    dayName: "Sunday",
-    dateStr: "Day 7",
-    tasks: [
-      { id: "d7-t1", subject: "Weekly Revision", topic: "Comprehensive Review of High-Priority Topics", activity: "Revision Quiz", duration_minutes: 90, priority: "high" },
-      { id: "d7-t2", subject: "Planner Reflection", topic: "Review Weekly Target Hours & Goal Calibration", activity: "Self Assessment", duration_minutes: 30, priority: "low" },
-    ],
-  },
-];
-
 export default function DashboardPage() {
   const router = useRouter();
   const { user, isLoaded: isUserLoaded } = useUser();
@@ -232,11 +160,11 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
-  const [hasPlan, setHasPlan] = useState<boolean>(true);
+  const [hasPlan, setHasPlan] = useState<boolean>(false);
   const [userProfile, setUserProfile] = useState<UserProfileState | null>(null);
 
   // Live Plan Data State from GET /api/v1/plans
-  const [schedule, setSchedule] = useState<ScheduleDay[]>(INITIAL_7_DAY_SCHEDULE);
+  const [schedule, setSchedule] = useState<ScheduleDay[]>([]);
   const [planOverview, setPlanOverview] = useState<PlanOverviewData | null>(null);
   const [monthlyMilestones, setMonthlyMilestones] = useState<MonthlyMilestone[]>([]);
   const [studyTips, setStudyTips] = useState<string[]>([]);
@@ -435,7 +363,7 @@ export default function DashboardPage() {
   const togglePlanState = () => setHasPlan((prev) => !prev);
 
   // Calculate totals & completion metrics based on live schedule
-  const activeSchedule = schedule.length > 0 ? schedule : INITIAL_7_DAY_SCHEDULE;
+  const activeSchedule = schedule;
   const allTasks = activeSchedule.flatMap((day) => day.tasks);
   const totalTasksCount = allTasks.length;
   const completedTasksCount = completedTaskIds.filter(id => allTasks.some(t => t.id === id)).length;
@@ -456,25 +384,25 @@ export default function DashboardPage() {
     ? `Semester ${planOverview.student_semester}`
     : userProfile?.semester
     ? `Semester ${userProfile.semester}`
-    : "Semester 5";
+    : "N/A";
 
   const displayWeeklyHours = planOverview?.weekly_total_hours
     ? `${planOverview.weekly_total_hours} hrs`
     : userProfile?.study_hours_per_day
     ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
-    : "28.5 hrs";
+    : "0 hrs";
 
   const displayDailyHoursSubtitle = planOverview?.daily_target_hours
     ? `${planOverview.daily_target_hours} hrs/day target`
     : userProfile?.study_hours_per_day
     ? `${userProfile.study_hours_per_day} hrs/day target`
-    : "Target plan";
+    : "No target set";
 
   const displayFocusSubject = planOverview?.primary_focus
     ? planOverview.primary_focus
     : (userProfile?.subjects && userProfile.subjects.length > 0)
     ? userProfile.subjects[0]
-    : "Data Structures";
+    : "General Study";
 
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
