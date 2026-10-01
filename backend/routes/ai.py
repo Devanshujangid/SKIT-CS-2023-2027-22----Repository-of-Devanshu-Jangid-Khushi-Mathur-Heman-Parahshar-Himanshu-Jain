@@ -4,11 +4,11 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
@@ -16,8 +16,12 @@ from google.genai import types
 from prompts.study_plan import (
     OnboardingDataInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
+    REGENERATION_SYSTEM_INSTRUCTION,
+    RegenerationInput,
     build_study_plan_prompt,
+    build_regeneration_prompt,
     validate_study_plan_output,
+    StudyPlanOutputSchema,
 )
 from auth import verify_clerk_token
 from database import save_study_plan
@@ -28,6 +32,8 @@ load_dotenv()
 router = APIRouter(prefix="/api/v1/ai", tags=["AI"])
 
 logger = logging.getLogger(__name__)
+
+generation_status = {}
 
 
 # -----------------------------
@@ -40,6 +46,22 @@ class TestPromptRequest(BaseModel):
 
 class GeneratePlanRequest(BaseModel):
     onboarding_data: OnboardingDataInput
+
+
+class RegeneratePlanRequest(BaseModel):
+    current_plan: StudyPlanOutputSchema = Field(
+        ...,
+        description="The previous study plan's JSON object history to be used as context"
+    )
+    user_feedback: str = Field(
+        ...,
+        description="User's prompt instruction for tweaking or updating the plan (e.g., 'Make Wednesday lighter')"
+    )
+    onboarding_data: Optional[OnboardingDataInput] = Field(
+        None,
+        description="Optional student onboarding profile context"
+    )
+
 
 
 # -----------------------------
@@ -180,7 +202,83 @@ def extract_json(text: str) -> Dict[str, Any]:
             ) from exc
 
 
+def generate_and_save_plan(
+    user_prompt: str,
+    clerk_id: str,
+    system_instruction: str = STUDY_PLAN_SYSTEM_INSTRUCTION
+):
+    try:
+        print(">>> BACKGROUND TASK STARTED", flush=True)
+        logger.info("Background study plan generation started")
 
+        generation_status[clerk_id] = {
+            "status": "generating",
+            "message": "Your study plan is being generated."
+        }
+
+        response_text = generate_gemini_response(
+            prompt=user_prompt,
+            system_instruction=system_instruction
+        )
+
+        print(">>> GEMINI RESPONSE RECEIVED", flush=True)
+
+        raw_plan = extract_json(response_text)
+        validated_plan = validate_study_plan_output(raw_plan)
+        print(">>> PLAN VALIDATED", flush=True)
+
+        save_study_plan(
+            clerk_id=clerk_id,
+            plan_data=validated_plan.model_dump()
+        )
+        print(">>> PLAN SAVED TO DATABASE", flush=True)
+        generation_status[clerk_id] = {
+            "status": "completed",
+            "message": "Study plan generated successfully."
+        }
+        logger.info(
+            "Background study plan generation completed successfully"
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "Background study plan generation failed"
+        )
+
+        generation_status[clerk_id] = {
+            "status": "failed",
+            "message": "Study plan generation failed. Please try again."
+        }
+
+
+# -----------------------------
+# Generation Status Endpoint
+# -----------------------------
+
+@router.get("/generation-status")
+async def get_generation_status(
+    user_data: dict = Depends(verify_clerk_token)
+):
+    clerk_id = user_data.get("sub")
+
+    if not clerk_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user Clerk ID is missing"
+        )
+
+    generation = generation_status.get(
+        clerk_id,
+        {
+            "status": "not_started",
+            "message": "No study plan generation has been started."
+        }
+    )
+
+    return {
+        "success": True,
+        **generation
+    }
 # -----------------------------
 # Test Endpoint
 # -----------------------------
@@ -212,6 +310,7 @@ async def test_ai(request: TestPromptRequest):
 @router.post("/generate-plan")
 async def generate_study_plan(
     request: GeneratePlanRequest,
+    background_tasks: BackgroundTasks,
     user_data: dict = Depends(verify_clerk_token)
 ):
     try:
@@ -221,30 +320,19 @@ async def generate_study_plan(
 
         model = get_target_model()
 
-        response_text = generate_gemini_response(
-            prompt=user_prompt,
-            system_instruction=STUDY_PLAN_SYSTEM_INSTRUCTION
-        )
-
-        raw_plan = extract_json(response_text)
-        validated_plan = validate_study_plan_output(raw_plan)
 
         clerk_id = user_data.get("sub")
 
         if not clerk_id:
             raise RuntimeError("Authenticated user Clerk ID is missing")
 
-        # Save generated study plan for the authenticated user 
-        saved_plan = save_study_plan( 
-            clerk_id=clerk_id, 
-            plan_data=validated_plan.model_dump() 
-        )
+        # Add the background task to generate and save the study plan
+        background_tasks.add_task(generate_and_save_plan, user_prompt=user_prompt, clerk_id=clerk_id)
 
         return {
             "success": True,
+            "message": "Study plan generation started",
             "model": model,
-            "plan": validated_plan.model_dump(),
-            "saved_plan": saved_plan,
         }
 
     except Exception as exc:
@@ -253,4 +341,59 @@ async def generate_study_plan(
         raise HTTPException(
             status_code=500,
             detail=str(exc)
-        )
+        )
+
+
+# -----------------------------
+# Regenerate / Tweak Study Plan Endpoint
+# -----------------------------
+
+@router.post("/regenerate-plan")
+@router.post("/tweak-plan")
+async def regenerate_study_plan(
+    request: RegeneratePlanRequest,
+    background_tasks: BackgroundTasks,
+    user_data: dict = Depends(verify_clerk_token)
+):
+    """
+    Refines an existing study plan by passing the previous plan's JSON history
+    as context to Gemini alongside the user's prompt instruction.
+    """
+    try:
+        clerk_id = user_data.get("sub")
+
+        if not clerk_id:
+            raise RuntimeError("Authenticated user Clerk ID is missing")
+
+        # Construct RegenerationInput context combining current plan history and user tweak feedback
+        regeneration_input = RegenerationInput(
+            current_plan=request.current_plan,
+            user_feedback=request.user_feedback,
+            onboarding_data=request.onboarding_data
+        )
+
+        user_prompt = build_regeneration_prompt(regeneration_input)
+        model = get_target_model()
+
+        # Add background task to regenerate and save the refined study plan
+        background_tasks.add_task(
+            generate_and_save_plan,
+            user_prompt=user_prompt,
+            clerk_id=clerk_id,
+            system_instruction=REGENERATION_SYSTEM_INSTRUCTION
+        )
+
+        return {
+            "success": True,
+            "message": "Study plan regeneration started",
+            "model": model,
+        }
+
+    except Exception as exc:
+        logger.exception("Study plan regeneration failed")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
+
