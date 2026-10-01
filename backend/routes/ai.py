@@ -211,7 +211,10 @@ def generate_and_save_plan(
         print(">>> BACKGROUND TASK STARTED", flush=True)
         logger.info("Background study plan generation started")
 
-        generation_status[clerk_id] = "generating"
+        generation_status[clerk_id] = {
+            "status": "generating",
+            "message": "Your study plan is being generated."
+        }
 
         response_text = generate_gemini_response(
             prompt=user_prompt,
@@ -229,17 +232,23 @@ def generate_and_save_plan(
             plan_data=validated_plan.model_dump()
         )
         print(">>> PLAN SAVED TO DATABASE", flush=True)
-        generation_status[clerk_id] = "completed"
+        generation_status[clerk_id] = {
+            "status": "completed",
+            "message": "Study plan generated successfully."
+        }
         logger.info(
             "Background study plan generation completed successfully"
         )
 
-    except Exception:
-        generation_status[clerk_id] = "failed"
-
+    except Exception as exc:
         logger.exception(
             "Background study plan generation failed"
         )
+
+        generation_status[clerk_id] = {
+            "status": "failed",
+            "message": "Study plan generation failed. Please try again."
+        }
 
 
 # -----------------------------
@@ -258,11 +267,17 @@ async def get_generation_status(
             detail="Authenticated user Clerk ID is missing"
         )
 
-    status = generation_status.get(clerk_id, "not_started")
+    generation = generation_status.get(
+        clerk_id,
+        {
+            "status": "not_started",
+            "message": "No study plan generation has been started."
+        }
+    )
 
     return {
         "success": True,
-        "status": status
+        **generation
     }
 # -----------------------------
 # Test Endpoint
