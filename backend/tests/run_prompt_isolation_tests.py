@@ -22,6 +22,7 @@ from prompts.study_plan import (
     validate_study_plan_output,
     validate_target_score_alignment,
     validate_subject_name_fidelity,
+    validate_chronological_ordering,
     StudyPlanOutputSchema,
 )
 
@@ -453,6 +454,25 @@ def run_isolation_suite():
         print(f"  |-- Input Plan Ingestion: SUCCESS ({len(tweak_input.current_plan.weekly_schedule)} days parsed)")
         print(f"  |-- Tweaked JSON Output Schema Validation: STRICT COMPLIANCE CONFIRMED")
         print("  |-- Plan Regeneration & Tweaking Logic Path: VERIFIED & ACCURATE")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
+
+    # Task 6: Strict Chronological Ordering & Calendar File Export Timings Validation
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Strict Chronological Ordering & Calendar File Export Timings")
+    try:
+        sample_plan = validate_study_plan_output(REPRESENTATIVE_AI_RESPONSES[0])
+        chrono_report = validate_chronological_ordering(sample_plan)
+        
+        print(f"  |-- Days Sequence: {chrono_report['days_sequence']}")
+        print(f"  |-- Days Chronological Order: {chrono_report['days_chronological']}")
+        print(f"  |-- Calendar File Timings Ready: {chrono_report['has_calendar_timings']}")
+        print(f"  |-- Timing Conflicts / Overlaps: {len(chrono_report['timing_issues'])}")
+
+        assert chrono_report["days_chronological"], f"Days sequence is out of chronological order: {chrono_report['days_sequence']}"
+        assert len(chrono_report["timing_issues"]) == 0, f"Timing issues detected: {chrono_report['timing_issues']}"
+        print("  |-- Strict Chronological Ordering & Calendar Mapping: VERIFIED & ENFORCED")
         success_count += 1
     except Exception as e:
         print(f"  |-- FAILED: {e}")
