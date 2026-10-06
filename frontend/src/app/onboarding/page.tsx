@@ -115,6 +115,32 @@ export default function OnboardingPage() {
         throw new Error("AI Plan Generation failed to return success status.");
       }
 
+      // Poll generation status until backend background task finishes saving plan
+      let attempts = 0;
+      let isDone = false;
+      while (attempts < 20 && !isDone) {
+        await new Promise((r) => setTimeout(r, 1500));
+        attempts++;
+        try {
+          const statusRes = await fetch(`${API_BASE_URL}/api/v1/ai/generation-status`, {
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.status === "completed") {
+              isDone = true;
+            } else if (statusData.status === "failed") {
+              throw new Error(statusData.message || "Plan generation failed on server");
+            }
+          }
+        } catch (statusErr: any) {
+          if (statusErr.message && statusErr.message.includes("failed")) throw statusErr;
+        }
+      }
+
       // Navigate to dashboard where fetchPlans() auto-loads the new plan
       router.push("/dashboard");
     } catch (error: any) {
