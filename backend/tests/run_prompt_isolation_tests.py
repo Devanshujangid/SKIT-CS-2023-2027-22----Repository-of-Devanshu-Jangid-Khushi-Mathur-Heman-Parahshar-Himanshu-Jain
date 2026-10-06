@@ -78,6 +78,20 @@ REAL_ONBOARDING_PAYLOADS = [
                 {"name": "C++ & Rust Systems Programming", "difficulty": "hard", "target_score": "A"}
             ]
         }
+    },
+    {
+        "name": "Scenario E - Semester 8 Obscure & Advanced Technical Electives (Zero-Knowledge, Neuromorphic, Post-Quantum & VLSI)",
+        "payload": {
+            "semester": 8,
+            "study_hours_per_day": 5.5,
+            "goals": ["Publish Advanced Research Paper & Graduate with Honors"],
+            "subjects": [
+                {"name": "Zero-Knowledge Proofs & zk-SNARKs Cryptography (CS-801)", "difficulty": "hard", "target_score": "A+"},
+                {"name": "Neuromorphic Chip Design & Spiking Neural Networks", "difficulty": "hard", "target_score": "A+"},
+                {"name": "ECE 782: Sub-10nm FinFET & Gate-All-Around VLSI Architectures", "difficulty": "hard", "target_score": "A"},
+                {"name": "Post-Quantum Lattice Cryptosystems & Kyber/Dilithium (CRYPTO-509)", "difficulty": "hard", "target_score": "A+"}
+            ]
+        }
     }
 ]
 
@@ -473,6 +487,93 @@ def run_isolation_suite():
         assert chrono_report["days_chronological"], f"Days sequence is out of chronological order: {chrono_report['days_sequence']}"
         assert len(chrono_report["timing_issues"]) == 0, f"Timing issues detected: {chrono_report['timing_issues']}"
         print("  |-- Strict Chronological Ordering & Calendar Mapping: VERIFIED & ENFORCED")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
+
+    # Task 7: Obscure & Advanced Technical Electives Subject Name Fidelity & Zero Hallucination Audit
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Obscure & Advanced Technical Electives Subject Name Fidelity & Zero Hallucination")
+    try:
+        obscure_onboarding = OnboardingDataInput.model_validate(REAL_ONBOARDING_PAYLOADS[4]["payload"])
+        sample_obscure_response = {
+            "plan_overview": {
+                "student_semester": 8,
+                "daily_target_hours": 5.5,
+                "weekly_total_hours": 38.5,
+                "primary_focus": "Advanced Cryptography, Neuromorphic & Sub-10nm VLSI Research",
+                "strategy_summary": "High-intensity domain study for obscure specialized technical electives."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Monday",
+                    "total_hours": 5.5,
+                    "sessions": [
+                        {
+                            "subject": "Zero-Knowledge Proofs & zk-SNARKs Cryptography (CS-801)",
+                            "topic": "Quadratic Arithmetic Programs & Groth16 Proving System",
+                            "duration_hours": 3.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "09:00",
+                            "end_time": "12:00"
+                        },
+                        {
+                            "subject": "Neuromorphic Chip Design & Spiking Neural Networks",
+                            "topic": "Leaky Integrate-and-Fire (LIF) Neuron Hardware Models",
+                            "duration_hours": 2.5,
+                            "activity_type": "practice_problems",
+                            "priority": "high",
+                            "start_time": "13:00",
+                            "end_time": "15:30"
+                        }
+                    ]
+                },
+                {
+                    "day": "Wednesday",
+                    "total_hours": 5.5,
+                    "sessions": [
+                        {
+                            "subject": "ECE 782: Sub-10nm FinFET & Gate-All-Around VLSI Architectures",
+                            "topic": "GAAFET Transistor Parasitics & Quantum Tunneling Effects",
+                            "duration_hours": 3.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "09:00",
+                            "end_time": "12:00"
+                        },
+                        {
+                            "subject": "Post-Quantum Lattice Cryptosystems & Kyber/Dilithium (CRYPTO-509)",
+                            "topic": "Learning With Errors (LWE) & Module-LWE Hardness Reduction",
+                            "duration_hours": 2.5,
+                            "activity_type": "practice_problems",
+                            "priority": "high",
+                            "start_time": "13:00",
+                            "end_time": "15:30"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Verify zk-SNARK Circuits & Post-Quantum Lattice Proofs",
+                    "key_deliverable": "Achieve A+ target score benchmarks on cryptography research lab"
+                }
+            ],
+            "study_tips": ["Derive mathematical proofs on paper before hardware modeling."]
+        }
+
+        validated_obscure_plan = validate_study_plan_output(sample_obscure_response)
+        obscure_fidelity_report = validate_subject_name_fidelity(validated_obscure_plan, obscure_onboarding)
+
+        print(f"  |-- Enrolled Obscure Electives Count: {len(obscure_fidelity_report['enrolled_subjects'])}")
+        print(f"  |-- Scheduled Obscure Electives Count: {len(obscure_fidelity_report['scheduled_subjects'])}")
+        print(f"  |-- Unmatched Sessions: {len(obscure_fidelity_report['unmatched_sessions'])}")
+        print(f"  |-- Missing Enrolled Electives: {len(obscure_fidelity_report['missing_enrolled_subjects'])}")
+
+        assert obscure_fidelity_report["is_valid"], f"Obscure elective fidelity check failed. Unmatched: {obscure_fidelity_report['unmatched_sessions']}"
+        print("  |-- Obscure & Advanced Technical Electives Zero Hallucination: CONFIRMED (100% Exact Fidelity)")
         success_count += 1
     except Exception as e:
         print(f"  |-- FAILED: {e}")
