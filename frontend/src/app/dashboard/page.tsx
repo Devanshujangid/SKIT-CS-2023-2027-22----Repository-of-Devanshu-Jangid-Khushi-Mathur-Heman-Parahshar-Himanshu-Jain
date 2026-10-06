@@ -23,7 +23,9 @@ import {
   AlertCircle,
   Lightbulb,
   Milestone,
-  Loader2
+  Loader2,
+  Printer,
+  CalendarPlus
 } from "lucide-react";
 
 interface StatCardProps {
@@ -315,6 +317,32 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (data.success) {
+        // Poll backend async generation status until completion before fetching plan
+        let attempts = 0;
+        let isDone = false;
+        while (attempts < 20 && !isDone) {
+          await new Promise((r) => setTimeout(r, 1500));
+          attempts++;
+          try {
+            const statusRes = await fetch(`${API_BASE_URL}/api/v1/ai/generation-status`, {
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+            });
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
+              if (statusData.status === "completed") {
+                isDone = true;
+              } else if (statusData.status === "failed") {
+                throw new Error(statusData.message || "Plan generation failed on server");
+              }
+            }
+          } catch (statusErr: any) {
+            if (statusErr.message && statusErr.message.includes("failed")) throw statusErr;
+          }
+        }
+
         // Automatically fetch live plans to render new interactive schedule grid
         await fetchPlans();
       } else {
@@ -362,6 +390,78 @@ export default function DashboardPage() {
   const toggleLoading = () => setIsLoading((prev) => !prev);
   const togglePlanState = () => setHasPlan((prev) => !prev);
 
+  // Native PDF Export (Print View)
+  const handleExportPDF = () => {
+    window.print();
+  };
+
+  // Native iCalendar (.ics Blob) Export
+  const handleExportICS = () => {
+    if (!activeSchedule || activeSchedule.length === 0) return;
+
+    const now = new Date();
+    const formatDate = (date: Date) =>
+      date.toISOString().replace(/-|:|\.\d+/g, "").slice(0, 15) + "Z";
+
+    const icsLines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Smart Learning Planner//Academic Schedule//EN",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "X-WR-CALNAME:Smart 7-Day Study Plan",
+    ];
+
+    const baseDate = new Date();
+    baseDate.setHours(9, 0, 0, 0);
+
+    activeSchedule.forEach((daySchedule, dayIdx) => {
+      const eventDate = new Date(baseDate);
+      eventDate.setDate(baseDate.getDate() + dayIdx);
+
+      let currentHour = 9;
+
+      daySchedule.tasks.forEach((task) => {
+        const startDate = new Date(eventDate);
+        startDate.setHours(currentHour, 0, 0, 0);
+
+        const durationMins = task.duration_minutes || 60;
+        const endDate = new Date(startDate.getTime() + durationMins * 60 * 1000);
+
+        currentHour += Math.ceil(durationMins / 60);
+
+        const dtStart = formatDate(startDate);
+        const dtEnd = formatDate(endDate);
+        const summary = `[${task.subject}] ${task.topic}`;
+        const description = `Activity: ${task.activity}\\nPriority: ${task.priority.toUpperCase()}\\nDuration: ${task.duration_minutes} minutes`;
+
+        icsLines.push(
+          "BEGIN:VEVENT",
+          `UID:slp-${task.id}-${startDate.getTime()}@smartlearningplanner`,
+          `DTSTAMP:${formatDate(now)}`,
+          `DTSTART:${dtStart}`,
+          `DTEND:${dtEnd}`,
+          `SUMMARY:${summary}`,
+          `DESCRIPTION:${description}`,
+          "STATUS:CONFIRMED",
+          "END:VEVENT"
+        );
+      });
+    });
+
+    icsLines.push("END:VCALENDAR");
+
+    const blob = new Blob([icsLines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "smart_study_plan.ics");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Calculate totals & completion metrics based on live schedule
   const activeSchedule = schedule;
   const allTasks = activeSchedule.flatMap((day) => day.tasks);
@@ -405,11 +505,11 @@ export default function DashboardPage() {
     : "General Study";
 
   return (
-    <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
-      <div className="mx-auto max-w-6xl space-y-8">
+    <main className="min-h-screen bg-slate-50 p-6 sm:p-8 print:bg-white print:p-0">
+      <div className="mx-auto max-w-6xl space-y-8 print:space-y-4">
         
         {/* Testing & Navigation Control Bar with Live API Status */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm print:hidden">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
               <Sparkles className="h-4 w-4 text-indigo-600" />
@@ -471,20 +571,22 @@ export default function DashboardPage() {
         </div>
 
         {/* Header Section */}
-        <header className="flex items-center justify-between rounded-2xl bg-white p-6 shadow-sm">
+        <header className="flex items-center justify-between rounded-2xl bg-white p-6 shadow-sm print:shadow-none print:border print:border-slate-200 print:p-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl print:text-xl">
               Welcome back, {user?.firstName || user?.username || "Student"}! 👋
             </h1>
-            <p className="mt-1 text-slate-600">
+            <p className="mt-1 text-slate-600 print:text-xs">
               {planOverview?.strategy_summary || "Let's map out your academic success."}
             </p>
           </div>
-          <UserButton appearance={{ elements: { avatarBox: "h-12 w-12" } }} />
+          <div className="print:hidden">
+            <UserButton appearance={{ elements: { avatarBox: "h-12 w-12" } }} />
+          </div>
         </header>
 
         {/* Profile Summary Stat Bar */}
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-4 print:gap-2">
           <StatCard
             icon={<Clock className="h-6 w-6" />}
             title="Total Weekly Hours"
@@ -563,36 +665,60 @@ export default function DashboardPage() {
           <section className="space-y-6">
             
             {/* Timetable Header & Progress Card */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
+            <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 print:shadow-none print:border-slate-300 print:p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2">
-                      <Calendar className="h-6 w-6 text-indigo-600" />
-                      <h2 className="text-xl font-bold text-slate-900">7-Day Interactive Academic Schedule</h2>
+                      <Calendar className="h-6 w-6 text-indigo-600 print:h-5 print:w-5" />
+                      <h2 className="text-xl font-bold text-slate-900 print:text-lg">7-Day Interactive Academic Schedule</h2>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleGeneratePlan}
-                      disabled={isGeneratingPlan}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
-                      title="Generate a fresh 7-day schedule using Gemini AI"
-                    >
-                      {isGeneratingPlan ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
-                          <span>Generating...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-                          <span>Regenerate AI Plan</span>
-                        </>
-                      )}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 print:hidden">
+                      <button
+                        type="button"
+                        onClick={handleGeneratePlan}
+                        disabled={isGeneratingPlan}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
+                        title="Generate a fresh 7-day schedule using Gemini AI"
+                      >
+                        {isGeneratingPlan ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                            <span>Generating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>Regenerate AI Plan</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Export to PDF Button */}
+                      <button
+                        type="button"
+                        onClick={handleExportPDF}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-xs"
+                        title="Save schedule as PDF or print"
+                      >
+                        <Printer className="h-3.5 w-3.5 text-slate-600" />
+                        <span>Save as PDF</span>
+                      </button>
+
+                      {/* Add to Calendar (.ics) Button */}
+                      <button
+                        type="button"
+                        onClick={handleExportICS}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors cursor-pointer shadow-xs"
+                        title="Export 7-day schedule to your calendar (.ics)"
+                      >
+                        <CalendarPlus className="h-3.5 w-3.5 text-indigo-600" />
+                        <span>Add to Calendar</span>
+                      </button>
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-slate-500 print:hidden">
                     Track your daily study tasks. Check off topics as you complete them.
                   </p>
                 </div>
@@ -618,7 +744,7 @@ export default function DashboardPage() {
               </div>
 
               {/* 7-Day Navigation Tabs */}
-              <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+              <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-4 print:hidden">
                 {activeSchedule.map((d) => {
                   const dayTasks = d.tasks;
                   const dayDone = dayTasks.filter((t) => completedTaskIds.includes(t.id)).length;
@@ -796,7 +922,7 @@ export default function DashboardPage() {
 
       {/* High Visibility Generating Plan Loading Modal Overlay */}
       {isGeneratingPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 print:hidden">
           <div className="flex max-w-md flex-col items-center rounded-2xl bg-white p-8 text-center shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-200">
             <div className="relative mb-4 flex items-center justify-center">
               <div className="absolute h-16 w-16 animate-ping rounded-full bg-indigo-100 opacity-75"></div>
@@ -846,7 +972,7 @@ function PriorityBadge({ priority, isCompleted }: { priority: "high" | "medium" 
 function StatCard({ icon, title, value, subtitle, isLoading }: StatCardProps) {
   if (isLoading) {
     return (
-      <div className="flex items-center gap-4 rounded-2xl bg-white p-6 shadow-sm animate-pulse">
+      <div className="flex items-center gap-4 rounded-2xl bg-white p-6 shadow-sm animate-pulse print:hidden">
         <div className="h-12 w-12 rounded-lg bg-slate-200 shrink-0" />
         <div className="flex-1 space-y-2">
           <div className="h-4 w-24 rounded bg-slate-200" />
@@ -858,14 +984,14 @@ function StatCard({ icon, title, value, subtitle, isLoading }: StatCardProps) {
   }
 
   return (
-    <div className="flex items-center gap-4 rounded-2xl bg-white p-6 shadow-sm transition-all hover:shadow-md">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+    <div className="flex items-center gap-4 rounded-2xl bg-white p-6 shadow-sm transition-all hover:shadow-md print:shadow-none print:border print:border-slate-200 print:p-3">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 print:h-8 print:w-8">
         {icon}
       </div>
       <div>
-        <p className="text-sm font-medium text-slate-500">{title}</p>
-        <p className="text-xl font-bold text-slate-900">{value}</p>
-        {subtitle && <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p>}
+        <p className="text-sm font-medium text-slate-500 print:text-xs">{title}</p>
+        <p className="text-xl font-bold text-slate-900 print:text-base">{value}</p>
+        {subtitle && <p className="mt-0.5 text-xs text-slate-400 print:text-[10px]">{subtitle}</p>}
       </div>
     </div>
   );
