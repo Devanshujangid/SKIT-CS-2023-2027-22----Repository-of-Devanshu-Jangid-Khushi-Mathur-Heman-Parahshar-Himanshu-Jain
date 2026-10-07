@@ -5,15 +5,15 @@ import { useUser, useAuth, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
-import { 
-  BookOpen, 
-  Clock, 
-  Target, 
-  Sparkles, 
-  CalendarX2, 
-  RefreshCw, 
-  CheckSquare, 
-  Square, 
+import {
+  BookOpen,
+  Clock,
+  Target,
+  Sparkles,
+  CalendarX2,
+  RefreshCw,
+  CheckSquare,
+  Square,
   Calendar,
   CheckCircle2,
   TrendingUp,
@@ -98,8 +98,8 @@ interface BackendPlanData {
 interface PlanRecord {
   id: string;
   plan_data: BackendPlanData;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Map backend day names to day numbers
@@ -227,7 +227,7 @@ export default function DashboardPage() {
           // Process latest generated study plan
           const latestPlan = data.plans[data.plans.length - 1];
           let planData: BackendPlanData | null = null;
-          
+
           if (typeof latestPlan.plan_data === "string") {
             try {
               planData = JSON.parse(latestPlan.plan_data);
@@ -285,7 +285,7 @@ export default function DashboardPage() {
       const onboardingData = {
         semester: userProfile?.semester ? Number(userProfile.semester) : 1,
         study_hours_per_day: userProfile?.study_hours_per_day ? Number(userProfile.study_hours_per_day) : 4,
-        goals: userProfile?.goals 
+        goals: userProfile?.goals
           ? (Array.isArray(userProfile.goals) ? userProfile.goals : [userProfile.goals])
           : ["Master core academic subjects and maintain high academic performance"],
         subjects: userProfile?.subjects && userProfile.subjects.length > 0
@@ -377,7 +377,7 @@ export default function DashboardPage() {
       const next = prev.includes(taskId)
         ? prev.filter((id) => id !== taskId)
         : [...prev, taskId];
-      
+
       try {
         localStorage.setItem("slp_completed_tasks", JSON.stringify(next));
       } catch (e) {
@@ -467,8 +467,8 @@ export default function DashboardPage() {
   const allTasks = activeSchedule.flatMap((day) => day.tasks);
   const totalTasksCount = allTasks.length;
   const completedTasksCount = completedTaskIds.filter(id => allTasks.some(t => t.id === id)).length;
-  const weeklyProgressPercent = totalTasksCount > 0 
-    ? Math.round((completedTasksCount / totalTasksCount) * 100) 
+  const weeklyProgressPercent = totalTasksCount > 0
+    ? Math.round((completedTasksCount / totalTasksCount) * 100)
     : 0;
 
   const currentDaySchedule = activeSchedule.find((d) => d.dayNumber === selectedDay) || activeSchedule[0];
@@ -483,26 +483,26 @@ export default function DashboardPage() {
   const displaySemester = planOverview?.student_semester
     ? `Semester ${planOverview.student_semester}`
     : userProfile?.semester
-    ? `Semester ${userProfile.semester}`
-    : "N/A";
+      ? `Semester ${userProfile.semester}`
+      : "N/A";
 
   const displayWeeklyHours = planOverview?.weekly_total_hours
     ? `${planOverview.weekly_total_hours} hrs`
     : userProfile?.study_hours_per_day
-    ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
-    : "0 hrs";
+      ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
+      : "0 hrs";
 
   const displayDailyHoursSubtitle = planOverview?.daily_target_hours
     ? `${planOverview.daily_target_hours} hrs/day target`
     : userProfile?.study_hours_per_day
-    ? `${userProfile.study_hours_per_day} hrs/day target`
-    : "No target set";
+      ? `${userProfile.study_hours_per_day} hrs/day target`
+      : "No target set";
 
   const displayFocusSubject = planOverview?.primary_focus
     ? planOverview.primary_focus
     : (userProfile?.subjects && userProfile.subjects.length > 0)
-    ? userProfile.subjects[0]
-    : "General Study";
+      ? userProfile.subjects[0]
+      : "General Study";
 
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8 print:bg-white print:p-0">
@@ -623,7 +623,7 @@ export default function DashboardPage() {
                 <p className="mb-8 text-indigo-100">
                   Generate your first 7-day personalized academic schedule using Gemini AI. We will analyze your goals and available hours to build the perfect timetable.
                 </p>
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     if (!userProfile || !userProfile.subjects || userProfile.subjects.length === 0) {
@@ -663,7 +663,7 @@ export default function DashboardPage() {
         ) : (
           /* Interactive 7-Day Timetable Grid Section */
           <section className="space-y-6">
-            
+
             {/* Timetable Header & Progress Card */}
             <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 print:shadow-none print:border-slate-300 print:p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -759,17 +759,16 @@ export default function DashboardPage() {
                         isSelected
                           ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-                      }`}
+                        }`}
                     >
                       <span>{d.dayName}</span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                          isSelected
+                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${isSelected
                             ? "bg-indigo-700 text-indigo-100"
                             : isAllDone
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-slate-200 text-slate-600"
-                        }`}
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-200 text-slate-600"
+                          }`}
                       >
                         {isAllDone ? "✓" : `${dayDone}/${dayTasks.length}`}
                       </span>
@@ -792,7 +791,7 @@ export default function DashboardPage() {
                       {dayCompletedCount} of {dayTotalCount} tasks completed for today
                     </p>
                   </div>
-                  
+
                   {dayCompletedCount === dayTotalCount && dayTotalCount > 0 && (
                     <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200 self-start sm:self-auto">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -814,7 +813,7 @@ export default function DashboardPage() {
                           isCompleted
                             ? "bg-slate-50 border-slate-200 opacity-75"
                             : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-start gap-3 flex-1 min-w-0">
                           {/* Stateful Checkbox */}
@@ -1004,7 +1003,7 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-8 animate-pulse">
-        
+
         {/* Testing / Preview Control */}
         {onToggleLoading && (
           <div className="flex justify-end">
