@@ -5,15 +5,15 @@ import { useUser, useAuth, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
-import { 
-  BookOpen, 
-  Clock, 
-  Target, 
-  Sparkles, 
-  CalendarX2, 
-  RefreshCw, 
-  CheckSquare, 
-  Square, 
+import {
+  BookOpen,
+  Clock,
+  Target,
+  Sparkles,
+  CalendarX2,
+  RefreshCw,
+  CheckSquare,
+  Square,
   Calendar,
   CheckCircle2,
   TrendingUp,
@@ -225,7 +225,7 @@ export default function DashboardPage() {
           // Process latest generated study plan
           const latestPlan = data.plans[data.plans.length - 1];
           let planData: BackendPlanData | null = null;
-          
+
           if (typeof latestPlan.plan_data === "string") {
             try {
               planData = JSON.parse(latestPlan.plan_data);
@@ -283,7 +283,7 @@ export default function DashboardPage() {
       const onboardingData = {
         semester: userProfile?.semester ? Number(userProfile.semester) : 1,
         study_hours_per_day: userProfile?.study_hours_per_day ? Number(userProfile.study_hours_per_day) : 4,
-        goals: userProfile?.goals 
+        goals: userProfile?.goals
           ? (Array.isArray(userProfile.goals) ? userProfile.goals : [userProfile.goals])
           : ["Master core academic subjects and maintain high academic performance"],
         subjects: userProfile?.subjects && userProfile.subjects.length > 0
@@ -349,7 +349,7 @@ export default function DashboardPage() {
       const next = prev.includes(taskId)
         ? prev.filter((id) => id !== taskId)
         : [...prev, taskId];
-      
+
       try {
         localStorage.setItem("slp_completed_tasks", JSON.stringify(next));
       } catch (e) {
@@ -367,8 +367,8 @@ export default function DashboardPage() {
   const allTasks = activeSchedule.flatMap((day) => day.tasks);
   const totalTasksCount = allTasks.length;
   const completedTasksCount = completedTaskIds.filter(id => allTasks.some(t => t.id === id)).length;
-  const weeklyProgressPercent = totalTasksCount > 0 
-    ? Math.round((completedTasksCount / totalTasksCount) * 100) 
+  const weeklyProgressPercent = totalTasksCount > 0
+    ? Math.round((completedTasksCount / totalTasksCount) * 100)
     : 0;
 
   const currentDaySchedule = activeSchedule.find((d) => d.dayNumber === selectedDay) || activeSchedule[0];
@@ -383,31 +383,31 @@ export default function DashboardPage() {
   const displaySemester = planOverview?.student_semester
     ? `Semester ${planOverview.student_semester}`
     : userProfile?.semester
-    ? `Semester ${userProfile.semester}`
-    : "N/A";
+      ? `Semester ${userProfile.semester}`
+      : "N/A";
 
   const displayWeeklyHours = planOverview?.weekly_total_hours
     ? `${planOverview.weekly_total_hours} hrs`
     : userProfile?.study_hours_per_day
-    ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
-    : "0 hrs";
+      ? `${(userProfile.study_hours_per_day * 7).toFixed(1)} hrs`
+      : "0 hrs";
 
   const displayDailyHoursSubtitle = planOverview?.daily_target_hours
     ? `${planOverview.daily_target_hours} hrs/day target`
     : userProfile?.study_hours_per_day
-    ? `${userProfile.study_hours_per_day} hrs/day target`
-    : "No target set";
+      ? `${userProfile.study_hours_per_day} hrs/day target`
+      : "No target set";
 
   const displayFocusSubject = planOverview?.primary_focus
     ? planOverview.primary_focus
     : (userProfile?.subjects && userProfile.subjects.length > 0)
-    ? userProfile.subjects[0]
-    : "General Study";
+      ? userProfile.subjects[0]
+      : "General Study";
 
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-8">
-        
+
         {/* Testing & Navigation Control Bar with Live API Status */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
           <div className="flex items-center gap-3">
@@ -521,7 +521,7 @@ export default function DashboardPage() {
                 <p className="mb-8 text-indigo-100">
                   Generate your first 7-day personalized academic schedule using Gemini AI. We will analyze your goals and available hours to build the perfect timetable.
                 </p>
-                <button 
+                <button
                   type="button"
                   onClick={() => {
                     if (!userProfile || !userProfile.subjects || userProfile.subjects.length === 0) {
@@ -561,7 +561,7 @@ export default function DashboardPage() {
         ) : (
           /* Interactive 7-Day Timetable Grid Section */
           <section className="space-y-6">
-            
+
             {/* Timetable Header & Progress Card */}
             <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -629,21 +629,19 @@ export default function DashboardPage() {
                     <button
                       key={d.dayNumber}
                       onClick={() => setSelectedDay(d.dayNumber)}
-                      className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all cursor-pointer border ${
-                        isSelected
+                      className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all cursor-pointer border ${isSelected
                           ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
                           : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-                      }`}
+                        }`}
                     >
                       <span>{d.dayName}</span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                          isSelected
+                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${isSelected
                             ? "bg-indigo-700 text-indigo-100"
                             : isAllDone
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-slate-200 text-slate-600"
-                        }`}
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-200 text-slate-600"
+                          }`}
                       >
                         {isAllDone ? "✓" : `${dayDone}/${dayTasks.length}`}
                       </span>
@@ -666,7 +664,7 @@ export default function DashboardPage() {
                       {dayCompletedCount} of {dayTotalCount} tasks completed for today
                     </p>
                   </div>
-                  
+
                   {dayCompletedCount === dayTotalCount && dayTotalCount > 0 && (
                     <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -684,11 +682,10 @@ export default function DashboardPage() {
                       <div
                         key={task.id}
                         onClick={() => toggleTaskCompletion(task.id)}
-                        className={`group flex items-start gap-4 rounded-xl p-4 transition-all border cursor-pointer ${
-                          isCompleted
+                        className={`group flex items-start gap-4 rounded-xl p-4 transition-all border cursor-pointer ${isCompleted
                             ? "bg-slate-50 border-slate-200 opacity-75"
                             : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                        }`}
+                          }`}
                       >
                         {/* Stateful Checkbox */}
                         <button
@@ -711,11 +708,10 @@ export default function DashboardPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
-                              className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md ${
-                                isCompleted
+                              className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md ${isCompleted
                                   ? "bg-slate-200 text-slate-500 line-through"
                                   : "bg-indigo-50 text-indigo-700"
-                              }`}
+                                }`}
                             >
                               {task.subject}
                             </span>
@@ -727,9 +723,8 @@ export default function DashboardPage() {
                           </div>
 
                           <h4
-                            className={`mt-1.5 text-base font-semibold transition-colors ${
-                              isCompleted ? "text-slate-400 line-through" : "text-slate-900"
-                            }`}
+                            className={`mt-1.5 text-base font-semibold transition-colors ${isCompleted ? "text-slate-400 line-through" : "text-slate-900"
+                              }`}
                           >
                             {task.topic}
                           </h4>
@@ -876,7 +871,7 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-8 animate-pulse">
-        
+
         {/* Testing / Preview Control */}
         {onToggleLoading && (
           <div className="flex justify-end">
