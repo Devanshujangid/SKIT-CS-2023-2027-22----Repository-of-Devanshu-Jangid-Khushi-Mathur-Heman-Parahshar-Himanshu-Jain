@@ -43,6 +43,7 @@ class OnboardingDataInput(BaseModel):
 # Output Pydantic Schemas for Strict Response Validation
 # ---------------------------------------------------------------------------
 
+DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 DayName = Literal["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 ActivityType = Literal["core_concept_study", "practice_problems", "lecture_review", "revision_quiz"]
 PriorityLevel = Literal["high", "medium", "low"]
@@ -62,6 +63,8 @@ class SessionItem(BaseModel):
     duration_hours: float = Field(..., description="Session duration in hours")
     activity_type: ActivityType = Field(..., description="Type of study activity")
     priority: PriorityLevel = Field(..., description="Session priority level")
+    start_time: Optional[str] = Field(None, description="Optional start time in 24h format (e.g., '09:00') for calendar mapping")
+    end_time: Optional[str] = Field(None, description="Optional end time in 24h format (e.g., '11:00') for calendar mapping")
 
 
 class DaySchedule(BaseModel):
@@ -86,6 +89,18 @@ class StudyPlanOutputSchema(BaseModel):
     def validate_schedule_integrity(self):
         if not self.weekly_schedule:
             raise ValueError("weekly_schedule cannot be empty")
+
+        # Enforce strict chronological ordering of days (Monday through Sunday)
+        day_indices = []
+        day_order_map = {day: idx for idx, day in enumerate(DAY_ORDER)}
+        for day_item in self.weekly_schedule:
+            if day_item.day in day_order_map:
+                day_indices.append(day_order_map[day_item.day])
+
+        if day_indices != sorted(day_indices):
+            raise ValueError(
+                f"weekly_schedule days must follow strict chronological order (Monday -> Sunday). Got: {[d.day for d in self.weekly_schedule]}"
+            )
         return self
 
 
@@ -136,6 +151,7 @@ CRITICAL INSTRUCTIONS:
 5. DETERMINISM: Use consistent, structured activity types ('core_concept_study', 'practice_problems', 'lecture_review', 'revision_quiz') and priorities ('high', 'medium', 'low').
 6. TARGET SCORE & EXAM REVISION ALIGNMENT: Dynamic exam revision milestones (`monthly_milestones`) and key deliverables MUST explicitly reflect and incorporate the specific target scores (e.g., 'A+', '9.0+ CGPA', '90%+ score', 'GATE top 100') requested by the student for enrolled subjects and learning goals. Milestone deliverables must include quantitative revision assessment benchmarks matching these target scores.
 7. SUBJECT FIDELITY & NO HALLUCINATION: In `weekly_schedule`, session `subject` fields MUST use the EXACT subject name strings provided in the input profile (preserving course codes, numbers, and special characters like 'C++', 'AI/ML', 'BI-402'). DO NOT invent, abbreviate, or mutate subject names. Generate domain-accurate, highly relevant study topics appropriate for specialized subject domains.
+8. CHRONOLOGICAL ORDERING & CALENDAR TIMINGS: The `weekly_schedule` array MUST be ordered in strict chronological sequence from Monday to Sunday. Within each day, sessions MUST be listed in chronological sequence with explicit `start_time` and `end_time` strings in 24-hour HH:MM format (e.g., "start_time": "09:00", "end_time": "11:00") so that exported calendar files (ICS/Google Calendar) map accurately to specific days and time blocks.
 
 JSON SCHEMA SPECIFICATION:
 {
@@ -156,7 +172,9 @@ JSON SCHEMA SPECIFICATION:
           "topic": string,
           "duration_hours": number,
           "activity_type": "core_concept_study" | "practice_problems" | "lecture_review" | "revision_quiz",
-          "priority": "high" | "medium" | "low"
+          "priority": "high" | "medium" | "low",
+          "start_time": string,
+          "end_time": string
         }
       ]
     }
@@ -278,6 +296,58 @@ def validate_subject_name_fidelity(
     }
 
 
+def validate_chronological_ordering(plan: StudyPlanOutputSchema) -> Dict[str, Any]:
+    """
+    Validates that weekly_schedule days follow strict chronological order (Monday -> Sunday)
+    and that session start/end times within each day follow chronological sequence without overlap.
+    Returns a diagnostic report dictionary.
+    """
+    day_order_map = {day: idx for idx, day in enumerate(DAY_ORDER)}
+    days_present = [d.day for d in plan.weekly_schedule]
+    day_indices = [day_order_map[d] for d in days_present if d in day_order_map]
+
+    is_days_chronological = day_indices == sorted(day_indices)
+    has_calendar_timings = True
+    timing_issues = []
+
+    for day_item in plan.weekly_schedule:
+        last_end_minutes = -1
+        for s in day_item.sessions:
+            if not s.start_time or not s.end_time:
+                has_calendar_timings = False
+                continue
+
+            try:
+                sh, sm = map(int, s.start_time.split(":"))
+                eh, em = map(int, s.end_time.split(":"))
+                start_min = sh * 60 + sm
+                end_min = eh * 60 + em
+
+                if end_min <= start_min:
+                    timing_issues.append(
+                        f"{day_item.day} session '{s.subject}' end_time ({s.end_time}) is not after start_time ({s.start_time})"
+                    )
+
+                if start_min < last_end_minutes:
+                    timing_issues.append(
+                        f"{day_item.day} session '{s.subject}' start_time ({s.start_time}) overlaps with preceding session"
+                    )
+
+                last_end_minutes = max(last_end_minutes, end_min)
+            except Exception:
+                has_calendar_timings = False
+
+    is_valid = is_days_chronological and len(timing_issues) == 0
+
+    return {
+        "is_valid": is_valid,
+        "days_chronological": is_days_chronological,
+        "days_sequence": days_present,
+        "has_calendar_timings": has_calendar_timings,
+        "timing_issues": timing_issues,
+    }
+
+
 REGENERATION_SYSTEM_INSTRUCTION = """
 You are an expert AI Academic Coach and Study Planner specializing in personalized study schedule adaptation.
 Your task is to modify an existing 7-day personalized study plan based on a user's specific tweak request (e.g., "Make Wednesday lighter", "Add 2 hours of revision on Saturday").
@@ -293,6 +363,7 @@ CRITICAL INSTRUCTIONS:
 5. SUBJECT FIDELITY & NO HALLUCINATION: In `weekly_schedule`, session `subject` fields MUST use the EXACT subject name strings from the original plan or onboarding profile. DO NOT invent, alter, or abbreviate subject names.
 6. TARGET SCORE & MILESTONE INTEGRITY: Preserve dynamic exam revision milestones (`monthly_milestones`) and key deliverables aligned with target scores unless specifically asked to change them.
 7. DETERMINISTIC METRICS: Ensure `activity_type` uses only ('core_concept_study', 'practice_problems', 'lecture_review', 'revision_quiz') and `priority` uses only ('high', 'medium', 'low').
+8. CHRONOLOGICAL ORDERING & CALENDAR TIMINGS: The `weekly_schedule` array MUST be ordered in strict chronological sequence from Monday to Sunday. Within each day, sessions MUST be listed in chronological sequence with explicit `start_time` and `end_time` strings in 24-hour HH:MM format (e.g., "start_time": "09:00", "end_time": "11:00") so that exported calendar files (ICS/Google Calendar) map accurately to specific days and time blocks.
 
 JSON SCHEMA SPECIFICATION:
 {
@@ -313,7 +384,9 @@ JSON SCHEMA SPECIFICATION:
           "topic": string,
           "duration_hours": number,
           "activity_type": "core_concept_study" | "practice_problems" | "lecture_review" | "revision_quiz",
-          "priority": "high" | "medium" | "low"
+          "priority": "high" | "medium" | "low",
+          "start_time": string,
+          "end_time": string
         }
       ]
     }

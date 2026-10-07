@@ -13,6 +13,9 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
+from database import save_study_plan
+from rate_limit import check_gemini_rate_limit
+
 from prompts.study_plan import (
     OnboardingDataInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
@@ -326,6 +329,8 @@ async def generate_study_plan(
         if not clerk_id:
             raise RuntimeError("Authenticated user Clerk ID is missing")
 
+        check_gemini_rate_limit(clerk_id)
+
         # Add the background task to generate and save the study plan
         background_tasks.add_task(generate_and_save_plan, user_prompt=user_prompt, clerk_id=clerk_id)
 
@@ -335,6 +340,9 @@ async def generate_study_plan(
             "model": model,
         }
 
+
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Study plan generation failed")
 

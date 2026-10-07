@@ -25,6 +25,7 @@ from prompts.study_plan import (
     validate_study_plan_output,
     validate_target_score_alignment,
     validate_subject_name_fidelity,
+    validate_chronological_ordering,
     StudyPlanOutputSchema,
 )
 
@@ -483,8 +484,92 @@ class TestRegenerationPromptAndSchema(unittest.TestCase):
         self.assertIn('STRICT TIME RE-BALANCING', REGENERATION_SYSTEM_INSTRUCTION)
 
 
+class TestChronologicalOrderingValidation(unittest.TestCase):
+    """
+    Tests strict chronological ordering of days and session start/end time validation.
+    """
+
+    def setUp(self):
+        self.valid_ordered_plan_dict = {
+            "plan_overview": {
+                "student_semester": 5,
+                "daily_target_hours": 4.0,
+                "weekly_total_hours": 8.0,
+                "primary_focus": "Chronological Testing",
+                "strategy_summary": "Sequential daily coverage."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Monday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Processes",
+                            "duration_hours": 2.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "09:00",
+                            "end_time": "11:00"
+                        },
+                        {
+                            "subject": "Computer Networks",
+                            "topic": "IP Addressing",
+                            "duration_hours": 2.0,
+                            "activity_type": "practice_problems",
+                            "priority": "medium",
+                            "start_time": "11:30",
+                            "end_time": "13:30"
+                        }
+                    ]
+                },
+                {
+                    "day": "Thursday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Database Management Systems",
+                            "topic": "SQL Queries",
+                            "duration_hours": 4.0,
+                            "activity_type": "practice_problems",
+                            "priority": "high",
+                            "start_time": "14:00",
+                            "end_time": "18:00"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Chronological review",
+                    "key_deliverable": "Pass quiz"
+                }
+            ],
+            "study_tips": ["Follow scheduled times strictly."]
+        }
+
+    def test_chronological_day_ordering_passes(self):
+        plan = StudyPlanOutputSchema.model_validate(self.valid_ordered_plan_dict)
+        report = validate_chronological_ordering(plan)
+        self.assertTrue(report["is_valid"])
+        self.assertTrue(report["days_chronological"])
+        self.assertTrue(report["has_calendar_timings"])
+
+    def test_out_of_order_days_raises_validation_error(self):
+        invalid_dict = dict(self.valid_ordered_plan_dict)
+        # Swap Monday and Thursday order to make it [Thursday, Monday]
+        invalid_dict["weekly_schedule"] = [
+            self.valid_ordered_plan_dict["weekly_schedule"][1],
+            self.valid_ordered_plan_dict["weekly_schedule"][0]
+        ]
+        with self.assertRaises(ValidationError):
+            StudyPlanOutputSchema.model_validate(invalid_dict)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

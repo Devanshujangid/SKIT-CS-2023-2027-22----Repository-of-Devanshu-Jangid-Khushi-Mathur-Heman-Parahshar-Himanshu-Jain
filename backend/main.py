@@ -7,6 +7,7 @@ from auth import verify_clerk_token
 from database import get_db
 from routes.ai import router as ai_router
 from routes.plans import router as plans_router
+from routes import export
 
 app = FastAPI(title="Smart Learning Planner API")
 
@@ -22,6 +23,7 @@ app.add_middleware(
 # Include AI Router
 app.include_router(ai_router)
 app.include_router(plans_router)
+app.include_router(export.router)
 
 
 # Request Payload Schema
