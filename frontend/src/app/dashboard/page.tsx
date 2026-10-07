@@ -96,8 +96,8 @@ interface BackendPlanData {
 interface PlanRecord {
   id: string;
   plan_data: BackendPlanData;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Map backend day names to day numbers
