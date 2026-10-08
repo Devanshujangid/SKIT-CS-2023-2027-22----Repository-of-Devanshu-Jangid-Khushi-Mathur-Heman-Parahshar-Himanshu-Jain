@@ -27,3 +27,9 @@ Thumbs.db
 .agents/
 skills-lock.json
 
+# Python virtual environment
+venv/
+recommendation/venv/
+
+# Jupyter
+.ipynb_checkpoints/
