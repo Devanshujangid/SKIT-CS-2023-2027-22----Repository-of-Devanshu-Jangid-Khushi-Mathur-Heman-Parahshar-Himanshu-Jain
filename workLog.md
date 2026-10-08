@@ -341,3 +341,109 @@ The change keeps the frontend API contract synchronized.
 No changes were made to unrelated dashboard functionality.
 The task was completed without modifying the backend endpoint.
 The implementation is ready to be committed and pushed.
+
+
+
+
+
+
+1. Worked on the Smart Learning Planner backend and database integration.
+2. Worked primarily on Backend and Database responsibilities.
+3. Used FastAPI for backend API development.
+4. Used Supabase PostgreSQL as the project database.
+5. Integrated Clerk authentication with the backend.
+6. Worked with authenticated Clerk user information.
+7. Mapped Clerk user IDs with internal database user records.
+8. Verified the users table structure.
+9. Maintained the clerk_id field for identifying users.
+10. Verified the student_profiles table structure.
+11. Used foreign-key relationships between users and student profiles.
+12. Added proper cascading relationships for dependent records.
+13. Verified ON DELETE CASCADE behavior.
+14. Tested deletion of a user with dependent profile data.
+15. Confirmed dependent records were removed correctly.
+16. Worked on the study_plans database table.
+17. Stored generated study plans using JSONB data.
+18. Added timestamp metadata to study-plan records.
+19. Used created_at to track plan creation time.
+20. Used updated_at to track plan modification time.
+21. Added is_active to identify the active study plan.
+22. Removed the previous unique restriction on user_id.
+23. Allowed multiple study plans for one student.
+24. Added an index for efficient study-plan retrieval.
+25. Created a composite index for plan queries.
+26. Verified database constraints after the changes.
+27. Verified the study-plan foreign-key relationship.
+28. Worked on the FastAPI database connection.
+29. Used environment variables for Supabase configuration.
+30. Used the Supabase service-role connection on the backend.
+31. Added database connection validation.
+32. Worked on the get_db database helper.
+33. Worked on study-plan persistence functionality.
+34. Implemented user lookup using Clerk ID.
+35. Retrieved the internal UUID associated with the Clerk user.
+36. Used the internal UUID for study-plan operations.
+37. Worked on the GET /api/v1/plans endpoint.
+38. Protected the endpoint using Clerk token verification.
+39. Extracted the authenticated user's Clerk ID.
+40. Queried the users table using the Clerk ID.
+41. Retrieved the required internal user ID.
+42. Used the ID to retrieve the student's study plans.
+43. Restricted results to the authenticated student's records.
+44. Filtered plans using is_active = true.
+45. Ordered plans by created_at in descending order.
+46. Retrieved the latest active study plan.
+47. Limited the query to the required records.
+48. Reduced unnecessary database data retrieval.
+49. Returned study-plan information through the API.
+50. Included the study-plan id in the API response.
+51. Included plan_data in the API response.
+52. Included created_at in the API response.
+53. Included updated_at in the API response.
+54. Included is_active in the API response.
+55. Verified timestamp metadata availability for the frontend.
+56. Worked with the frontend PlanRecord TypeScript interface.
+57. Verified timestamp fields in the frontend model.
+58. Updated timestamp fields from optional to required.
+59. Changed created_at from optional to required.
+60. Changed updated_at from optional to required.
+61. Aligned the frontend model with the backend API response.
+62. Ensured export functionality can access timestamps reliably.
+63. Worked on frontend compatibility with the backend response.
+64. Checked dashboard code for plan-data handling.
+65. Verified latest generated plan processing.
+66. Verified TypeScript compatibility after the changes.
+67. Ran the frontend production build.
+68. Used npm run build inside the frontend directory.
+69. Next.js compilation completed successfully.
+70. TypeScript checking completed successfully.
+71. Static page generation completed successfully.
+72. Dashboard route compiled successfully.
+73. No TypeScript build errors were reported.
+74. Reviewed the Git diff before committing.
+75. Used selective Git staging instead of git add .
+76. Prevented unrelated files from being included.
+77. Used git add -p for controlled staging.
+78. Reviewed individual changes during interactive staging.
+79. Staged the relevant frontend dashboard changes.
+80. Updated the project workLog.md file.
+81. Documented the completed development work.
+82. Checked repository status before committing.
+83. Verified the intended files were modified.
+84. Prepared a dedicated commit for the timestamp work.
+85. Used the commit message "Ensure plan timestamps for frontend export".
+86. Worked on the backend-Heman feature branch.
+87. Kept feature work separate from the main branch.
+88. Pulled latest changes from the main branch when required.
+89. Encountered merge conflicts while synchronizing branches.
+90. Inspected the conflict in frontend/src/app/dashboard/page.tsx.
+91. Identified differences between backend-Heman and main.
+92. Resolved the conflicting dashboard code carefully.
+93. Preserved relevant frontend changes from both branches.
+94. Verified the dashboard after resolving the conflict.
+95. Checked the project build after frontend changes.
+96. Confirmed that the frontend remained compilable.
+97. Connected database timestamps to API responses.
+98. Made timestamp metadata required in the frontend model.
+99. Supported reliable study-plan export formatting.
+100. Improved consistency between the database, FastAPI API, and Next.js frontend.
