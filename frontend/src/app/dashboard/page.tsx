@@ -25,7 +25,10 @@ import {
   Milestone,
   Loader2,
   Printer,
-  CalendarPlus
+  CalendarPlus,
+  ExternalLink,
+  GraduationCap,
+  Star
 } from "lucide-react";
 
 interface StatCardProps {
@@ -58,6 +61,73 @@ interface ScheduleDay {
   dateStr: string;
   tasks: ScheduleTask[];
 }
+
+interface RecommendedCourse {
+  id: string;
+  title: string;
+  provider: string;
+  difficulty: "Beginner" | "Intermediate" | "Advanced";
+  rating: number;
+  category: string;
+  url: string;
+}
+
+const RECOMMENDED_COURSES: RecommendedCourse[] = [
+  {
+    id: "course-1",
+    title: "Data Structures and Algorithms Specialization",
+    provider: "UC San Diego & HSE University",
+    difficulty: "Intermediate",
+    rating: 4.8,
+    category: "Data Structures",
+    url: "https://www.coursera.org/specializations/data-structures-algorithms",
+  },
+  {
+    id: "course-2",
+    title: "Operating Systems and You: Becoming a Tech Support Pro",
+    provider: "Google",
+    difficulty: "Beginner",
+    rating: 4.8,
+    category: "Operating Systems",
+    url: "https://www.coursera.org/learn/operating-systems",
+  },
+  {
+    id: "course-3",
+    title: "Computer Communications Specialization",
+    provider: "University of Colorado Boulder",
+    difficulty: "Intermediate",
+    rating: 4.6,
+    category: "Computer Networks",
+    url: "https://www.coursera.org/specializations/computer-communications",
+  },
+  {
+    id: "course-4",
+    title: "Database Management Essentials",
+    provider: "University of Colorado System",
+    difficulty: "Beginner",
+    rating: 4.7,
+    category: "Databases",
+    url: "https://www.coursera.org/learn/database-management",
+  },
+  {
+    id: "course-5",
+    title: "Machine Learning Specialization",
+    provider: "DeepLearning.AI & Stanford",
+    difficulty: "Beginner",
+    rating: 4.9,
+    category: "Machine Learning",
+    url: "https://www.coursera.org/specializations/machine-learning-introduction",
+  },
+  {
+    id: "course-6",
+    title: "AWS Fundamentals: Building Serverless Applications",
+    provider: "Amazon Web Services",
+    difficulty: "Intermediate",
+    rating: 4.7,
+    category: "Cloud Computing",
+    url: "https://www.coursera.org/learn/aws-fundamentals-building-serverless-applications",
+  },
+];
 
 // Backend Plan API Models
 interface PlanOverviewData {
@@ -178,6 +248,17 @@ export default function DashboardPage() {
   // AI Plan Generation State
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+
+  // Recommended Resources Simulated State (defaulting to true for now)
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(true);
+
+  // Simulate loading Coursera recommendations
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoadingRecommendations(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Load completed tasks & saved user profile from localStorage
   useEffect(() => {
@@ -567,6 +648,14 @@ export default function DashboardPage() {
               <RefreshCw className="h-3.5 w-3.5" />
               Toggle Skeleton View
             </button>
+            <button
+              onClick={() => setIsLoadingRecommendations((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+              title="Toggle Recommended Resources skeleton state"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Toggle Courses Skeleton
+            </button>
           </div>
         </div>
 
@@ -919,6 +1008,92 @@ export default function DashboardPage() {
           </section>
         )}
 
+        {/* Recommended Resources UI Section (Coursera Courses) */}
+        <section className="space-y-4 print:hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <GraduationCap className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-xl font-bold text-slate-900">Recommended Resources</h2>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Curated Coursera courses aligned with your academic curriculum and study goals.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-slate-400 hidden sm:inline-block">
+                Scroll horizontally for more courses →
+              </span>
+            </div>
+          </div>
+
+          {isLoadingRecommendations ? (
+            /* Horizontal Scrolling Skeleton Loader */
+            <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4 animate-pulse">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs space-y-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="h-5 w-20 rounded-md bg-slate-200" />
+                    <div className="h-4 w-4 rounded bg-slate-200" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-4 w-full rounded bg-slate-200" />
+                    <div className="h-4 w-3/4 rounded bg-slate-200" />
+                  </div>
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <div className="h-3.5 w-28 rounded bg-slate-100" />
+                    <div className="h-3.5 w-10 rounded bg-slate-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Horizontal Scrolling Coursera Course Cards Grid */
+            <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4">
+              {RECOMMENDED_COURSES.map((course) => (
+                <a
+                  key={course.id}
+                  href={course.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs hover:shadow-md hover:border-indigo-300 transition-all flex flex-col justify-between whitespace-normal cursor-pointer"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <CourseDifficultyBadge difficulty={course.difficulty} />
+                      <span className="text-slate-400 group-hover:text-indigo-600 transition-colors">
+                        <ExternalLink className="h-4 w-4" />
+                      </span>
+                    </div>
+
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-1 block">
+                      Coursera • {course.category}
+                    </span>
+
+                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
+                      {course.title}
+                    </h3>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                    <span className="truncate max-w-[170px]" title={course.provider}>
+                      {course.provider}
+                    </span>
+                    <span className="font-semibold text-slate-700 flex items-center gap-1 shrink-0">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                      {course.rating.toFixed(1)}
+                    </span>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </section>
+
       </div>
 
       {/* High Visibility Generating Plan Loading Modal Overlay */}
@@ -943,6 +1118,21 @@ export default function DashboardPage() {
         </div>
       )}
     </main>
+  );
+}
+
+// Course Difficulty Badge Component
+function CourseDifficultyBadge({ difficulty }: { difficulty: "Beginner" | "Intermediate" | "Advanced" }) {
+  const styles = {
+    Beginner: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Intermediate: "bg-blue-50 text-blue-700 border-blue-200",
+    Advanced: "bg-purple-50 text-purple-700 border-purple-200",
+  };
+
+  return (
+    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border capitalize ${styles[difficulty]}`}>
+      {difficulty}
+    </span>
   );
 }
 
@@ -1051,6 +1241,35 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
             <div className="h-16 w-full bg-slate-100 rounded-xl" />
             <div className="h-16 w-full bg-slate-100 rounded-xl" />
             <div className="h-16 w-full bg-slate-100 rounded-xl" />
+          </div>
+        </section>
+
+        {/* Recommended Resources Skeleton */}
+        <section className="space-y-4">
+          <div className="space-y-2">
+            <div className="h-6 w-56 bg-slate-200 rounded-md" />
+            <div className="h-4 w-80 bg-slate-200 rounded-md" />
+          </div>
+          <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="h-5 w-20 rounded-md bg-slate-200" />
+                  <div className="h-4 w-4 rounded bg-slate-200" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-4 w-full rounded bg-slate-200" />
+                  <div className="h-4 w-3/4 rounded bg-slate-200" />
+                </div>
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="h-3.5 w-28 rounded bg-slate-100" />
+                  <div className="h-3.5 w-10 rounded bg-slate-100" />
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
