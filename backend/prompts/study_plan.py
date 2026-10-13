@@ -84,6 +84,21 @@ class StudyPlanOutputSchema(BaseModel):
     weekly_schedule: List[DaySchedule]
     monthly_milestones: List[MonthlyMilestone]
     study_tips: List[str]
+    search_keywords: List[str] = Field(
+        default_factory=list,
+        description="Optimized search query phrases (combining enrolled subjects with core technical concepts and skills) to feed external course recommendation pipelines"
+    )
+
+    @field_validator("search_keywords", mode="before")
+    @classmethod
+    def normalize_search_keywords(cls, value):
+        if isinstance(value, str):
+            if "," in value:
+                return [k.strip() for k in value.split(",") if k.strip()]
+            return [value.strip()] if value.strip() else []
+        elif isinstance(value, list):
+            return [str(k).strip() for k in value if str(k).strip()]
+        return value or []
 
     @model_validator(mode="after")
     def validate_schedule_integrity(self):
@@ -152,6 +167,7 @@ CRITICAL INSTRUCTIONS:
 6. TARGET SCORE & EXAM REVISION ALIGNMENT: Dynamic exam revision milestones (`monthly_milestones`) and key deliverables MUST explicitly reflect and incorporate the specific target scores (e.g., 'A+', '9.0+ CGPA', '90%+ score', 'GATE top 100') requested by the student for enrolled subjects and learning goals. Milestone deliverables must include quantitative revision assessment benchmarks matching these target scores.
 7. SUBJECT FIDELITY & NO HALLUCINATION: In `weekly_schedule`, session `subject` fields MUST use the EXACT subject name strings provided in the input profile (preserving course codes, numbers, and special characters like 'C++', 'AI/ML', 'BI-402'). DO NOT invent, abbreviate, or mutate subject names. Generate domain-accurate, highly relevant study topics appropriate for specialized subject domains.
 8. CHRONOLOGICAL ORDERING & CALENDAR TIMINGS: The `weekly_schedule` array MUST be ordered in strict chronological sequence from Monday to Sunday. Within each day, sessions MUST be listed in chronological sequence with explicit `start_time` and `end_time` strings in 24-hour HH:MM format (e.g., "start_time": "09:00", "end_time": "11:00") so that exported calendar files (ICS/Google Calendar) map accurately to specific days and time blocks.
+9. OPTIMIZED SEARCH KEYWORDS FOR COURSE RECOMMENDATIONS: The output MUST include a `search_keywords` array containing 3 to 8 targeted, high-relevance search query phrases (e.g., "Operating Systems Process Synchronization", "Computer Networks TCP Congestion Control", "Database Management Systems SQL"). Each keyword phrase MUST combine the subject name with key technical concepts or core skills covered in the schedule so it can directly feed the external course recommendation engine (TF-IDF/Coursera catalog).
 
 JSON SCHEMA SPECIFICATION:
 {
@@ -186,7 +202,8 @@ JSON SCHEMA SPECIFICATION:
       "key_deliverable": string
     }
   ],
-  "study_tips": [string]
+  "study_tips": [string],
+  "search_keywords": [string]
 }
 """
 
@@ -207,7 +224,10 @@ Student Onboarding Profile:
 {subjects_formatted}
 
 Please generate the structured 7-day study plan according to the system instructions and exact JSON schema.
-IMPORTANT: Use the EXACT enrolled subject names in all schedule sessions (do not alter course codes, numbers, or special characters). Ensure dynamic exam revision milestones (`monthly_milestones`) and key deliverables explicitly reflect and target the specific target scores and academic goals requested by the student.
+IMPORTANT:
+- Use the EXACT enrolled subject names in all schedule sessions (do not alter course codes, numbers, or special characters).
+- Ensure dynamic exam revision milestones (`monthly_milestones`) and key deliverables explicitly reflect and target the specific target scores and academic goals requested by the student.
+- Generate high-yield, specific `search_keywords` combining subjects and technical concepts to power the external course recommendation pipeline.
 """
     return prompt.strip()
 
@@ -348,6 +368,20 @@ def validate_chronological_ordering(plan: StudyPlanOutputSchema) -> Dict[str, An
     }
 
 
+def validate_search_keywords(plan: StudyPlanOutputSchema) -> Dict[str, Any]:
+    """
+    Validates that search_keywords are present and non-empty in the generated study plan,
+    suitable for querying the course recommendation pipeline.
+    """
+    keywords = [k.strip() for k in plan.search_keywords if isinstance(k, str) and k.strip()]
+    is_valid = len(keywords) > 0
+    return {
+        "is_valid": is_valid,
+        "keywords_count": len(keywords),
+        "search_keywords": keywords,
+    }
+
+
 REGENERATION_SYSTEM_INSTRUCTION = """
 You are an expert AI Academic Coach and Study Planner specializing in personalized study schedule adaptation.
 Your task is to modify an existing 7-day personalized study plan based on a user's specific tweak request (e.g., "Make Wednesday lighter", "Add 2 hours of revision on Saturday").
@@ -364,6 +398,7 @@ CRITICAL INSTRUCTIONS:
 6. TARGET SCORE & MILESTONE INTEGRITY: Preserve dynamic exam revision milestones (`monthly_milestones`) and key deliverables aligned with target scores unless specifically asked to change them.
 7. DETERMINISTIC METRICS: Ensure `activity_type` uses only ('core_concept_study', 'practice_problems', 'lecture_review', 'revision_quiz') and `priority` uses only ('high', 'medium', 'low').
 8. CHRONOLOGICAL ORDERING & CALENDAR TIMINGS: The `weekly_schedule` array MUST be ordered in strict chronological sequence from Monday to Sunday. Within each day, sessions MUST be listed in chronological sequence with explicit `start_time` and `end_time` strings in 24-hour HH:MM format (e.g., "start_time": "09:00", "end_time": "11:00") so that exported calendar files (ICS/Google Calendar) map accurately to specific days and time blocks.
+9. OPTIMIZED SEARCH KEYWORDS FOR COURSE RECOMMENDATIONS: Ensure the `search_keywords` array is updated to contain 3 to 8 high-relevance search query phrases reflecting the active and adjusted subjects, skills, and technical topics in the revised schedule to feed the external course recommendation engine.
 
 JSON SCHEMA SPECIFICATION:
 {
@@ -398,7 +433,8 @@ JSON SCHEMA SPECIFICATION:
       "key_deliverable": string
     }
   ],
-  "study_tips": [string]
+  "study_tips": [string],
+  "search_keywords": [string]
 }
 """
 
@@ -436,6 +472,7 @@ CRITICAL REQUIREMENTS:
 - Recalculate daily `total_hours` for all modified days so they equal the sum of session durations, without exceeding daily available study hours limits.
 - Update `weekly_total_hours` in `plan_overview` to match the new sum across all 7 days.
 - Maintain EXACT subject names (do not alter course codes, numbers, or special characters).
+- Provide updated, optimized 'search_keywords' matching modified subjects and topics for course recommendation integration.
 - Respond ONLY with valid, raw JSON matching the required schema.
 """
     return prompt.strip()

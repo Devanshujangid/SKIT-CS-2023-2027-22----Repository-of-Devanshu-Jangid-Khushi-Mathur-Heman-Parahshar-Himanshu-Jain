@@ -26,6 +26,7 @@ from prompts.study_plan import (
     validate_target_score_alignment,
     validate_subject_name_fidelity,
     validate_chronological_ordering,
+    validate_search_keywords,
     StudyPlanOutputSchema,
 )
 
@@ -565,6 +566,101 @@ class TestChronologicalOrderingValidation(unittest.TestCase):
         ]
         with self.assertRaises(ValidationError):
             StudyPlanOutputSchema.model_validate(invalid_dict)
+
+
+class TestSearchKeywordsRecommendationIntegration(unittest.TestCase):
+    """
+    Tests search_keywords output field parsing, normalization, prompt rules,
+    and compatibility with Khushi's recommendation pipeline.
+    """
+
+    def setUp(self):
+        self.sample_plan_data = {
+            "plan_overview": {
+                "student_semester": 5,
+                "daily_target_hours": 4.0,
+                "weekly_total_hours": 28.0,
+                "primary_focus": "Core CS Mastery",
+                "strategy_summary": "Intensive problem solving and concept mastery."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Monday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Process Scheduling",
+                            "duration_hours": 2.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "09:00",
+                            "end_time": "11:00"
+                        },
+                        {
+                            "subject": "Computer Networks",
+                            "topic": "TCP/IP Protocols",
+                            "duration_hours": 2.0,
+                            "activity_type": "practice_problems",
+                            "priority": "medium",
+                            "start_time": "11:30",
+                            "end_time": "13:30"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Process synchronization lab",
+                    "key_deliverable": "Working semaphores program"
+                }
+            ],
+            "study_tips": ["Review lecture notes daily."],
+            "search_keywords": [
+                "Operating Systems Process Synchronization Semaphores",
+                "Computer Networks TCP Congestion Control",
+                "Database Indexing B-Trees SQL",
+                "Algorithms Dynamic Programming"
+            ]
+        }
+
+    def test_search_keywords_parsed_correctly(self):
+        plan = StudyPlanOutputSchema.model_validate(self.sample_plan_data)
+        self.assertEqual(len(plan.search_keywords), 4)
+        self.assertIn("Operating Systems Process Synchronization Semaphores", plan.search_keywords)
+        self.assertIn("Algorithms Dynamic Programming", plan.search_keywords)
+
+    def test_search_keywords_string_normalization(self):
+        raw_data = dict(self.sample_plan_data)
+        raw_data["search_keywords"] = "Operating Systems, Computer Networks, Database Systems"
+        plan = StudyPlanOutputSchema.model_validate(raw_data)
+        self.assertEqual(plan.search_keywords, ["Operating Systems", "Computer Networks", "Database Systems"])
+
+    def test_search_keywords_default_factory(self):
+        raw_data = dict(self.sample_plan_data)
+        del raw_data["search_keywords"]
+        plan = StudyPlanOutputSchema.model_validate(raw_data)
+        self.assertEqual(plan.search_keywords, [])
+
+    def test_validate_search_keywords_helper(self):
+        plan_with_keywords = StudyPlanOutputSchema.model_validate(self.sample_plan_data)
+        report = validate_search_keywords(plan_with_keywords)
+        self.assertTrue(report["is_valid"])
+        self.assertEqual(report["keywords_count"], 4)
+
+        raw_empty = dict(self.sample_plan_data)
+        raw_empty["search_keywords"] = []
+        plan_without_keywords = StudyPlanOutputSchema.model_validate(raw_empty)
+        report_empty = validate_search_keywords(plan_without_keywords)
+        self.assertFalse(report_empty["is_valid"])
+        self.assertEqual(report_empty["keywords_count"], 0)
+
+    def test_system_instructions_contain_search_keywords_rule(self):
+        self.assertIn("search_keywords", STUDY_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("OPTIMIZED SEARCH KEYWORDS", STUDY_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("search_keywords", REGENERATION_SYSTEM_INSTRUCTION)
+        self.assertIn("OPTIMIZED SEARCH KEYWORDS", REGENERATION_SYSTEM_INSTRUCTION)
 
 
 if __name__ == "__main__":

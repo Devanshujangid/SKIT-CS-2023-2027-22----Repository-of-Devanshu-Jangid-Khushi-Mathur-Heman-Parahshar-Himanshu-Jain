@@ -23,6 +23,7 @@ from prompts.study_plan import (
     validate_target_score_alignment,
     validate_subject_name_fidelity,
     validate_chronological_ordering,
+    validate_search_keywords,
     StudyPlanOutputSchema,
 )
 
@@ -273,6 +274,12 @@ REPRESENTATIVE_AI_RESPONSES = [
         "study_tips": [
             "Use Pomodoro technique (50 mins study / 10 mins break) to maintain focus.",
             "Write down key formulas and theorems in an active recall notebook."
+        ],
+        "search_keywords": [
+            "Operating Systems Process Synchronization Semaphores",
+            "Computer Networks TCP IP Stack Protocols",
+            "Theory of Computation Automata DFA NFA",
+            "Database Management Systems Relational Algebra SQL"
         ]
     }
 ]
@@ -561,7 +568,13 @@ def run_isolation_suite():
                     "key_deliverable": "Achieve A+ target score benchmarks on cryptography research lab"
                 }
             ],
-            "study_tips": ["Derive mathematical proofs on paper before hardware modeling."]
+            "study_tips": ["Derive mathematical proofs on paper before hardware modeling."],
+            "search_keywords": [
+                "Zero-Knowledge Proofs zk-SNARKs Groth16",
+                "Neuromorphic Spiking Neural Networks Hardware",
+                "Sub-10nm FinFET GAAFET VLSI Architecture",
+                "Post-Quantum Lattice Cryptography Kyber Dilithium"
+            ]
         }
 
         validated_obscure_plan = validate_study_plan_output(sample_obscure_response)
@@ -574,6 +587,28 @@ def run_isolation_suite():
 
         assert obscure_fidelity_report["is_valid"], f"Obscure elective fidelity check failed. Unmatched: {obscure_fidelity_report['unmatched_sessions']}"
         print("  |-- Obscure & Advanced Technical Electives Zero Hallucination: CONFIRMED (100% Exact Fidelity)")
+        success_count += 1
+    except Exception as e:
+        print(f"  |-- FAILED: {e}")
+
+    # Task 8: Validating Optimized Search Keywords for Course Recommendation Engine Integration
+    total_tests += 1
+    print(f"\n[TEST {total_tests}] Validating Optimized Search Keywords for Course Recommendation Pipeline Integration")
+    try:
+        sample_plan = validate_study_plan_output(REPRESENTATIVE_AI_RESPONSES[0])
+        keywords_report = validate_search_keywords(sample_plan)
+
+        print(f"  |-- Search Keywords Found: {keywords_report['keywords_count']}")
+        print(f"  |-- Keywords List: {keywords_report['search_keywords']}")
+
+        assert keywords_report["is_valid"], "search_keywords validation failed: expected non-empty list of keyword strings"
+        assert len(keywords_report["search_keywords"]) >= 3, "Expected at least 3 search keyword phrases for course recommendations"
+
+        # Verify keywords integrate cleanly with recommendation query requirements
+        for kw in keywords_report["search_keywords"]:
+            assert isinstance(kw, str) and len(kw.strip().split()) >= 2, f"Keyword '{kw}' should be a multi-word topic query"
+
+        print("  |-- Search Keywords Output Schema & Recommendation Pipeline Feasibility: VERIFIED & CONFIRMED")
         success_count += 1
     except Exception as e:
         print(f"  |-- FAILED: {e}")
