@@ -16,3 +16,5 @@ google-ai-generativelanguage==0.6.15
 google-api-python-client==2.200.0
 google-auth==2.57.0
 google-auth-httplib2==0.4.2
+pandas
+scikit-learn
