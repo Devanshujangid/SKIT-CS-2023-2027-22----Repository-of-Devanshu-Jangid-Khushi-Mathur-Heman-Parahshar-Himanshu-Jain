@@ -1,3 +1,4 @@
+
 import os
 import httpx
 import jwt
@@ -7,38 +8,45 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Require credentials to be checked explicitly
 security = HTTPBearer(auto_error=False)
 
-CLERK_ISSUER_URL = os.getenv("CLERK_ISSUER_URL", "")
-
-if not CLERK_ISSUER_URL:
-    print("Notice: CLERK_ISSUER_URL is missing in backend/.env. Running in dev mock auth mode.")
+CLERK_ISSUER_URL = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
 
 
 async def verify_clerk_token(
     credentials: HTTPAuthorizationCredentials = Security(security)
 ) -> dict:
 
-    if not CLERK_ISSUER_URL or not credentials or not credentials.credentials:
-        return {
-            "sub": "dev_user_default",
-            "email": "student@example.com"
-        }
+    # Reject requests without a Bearer token
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Fail closed if Clerk is not configured
+    if not CLERK_ISSUER_URL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication service is not configured"
+        )
 
     token = credentials.credentials
 
     try:
-        issuer = CLERK_ISSUER_URL.rstrip("/")
-        jwks_url = f"{issuer}/.well-known/jwks.json"
+        # Fetch Clerk's public signing keys
+        jwks_url = f"{CLERK_ISSUER_URL}/.well-known/jwks.json"
 
         async with httpx.AsyncClient() as client:
             response = await client.get(jwks_url, timeout=5.0)
             response.raise_for_status()
             jwks = response.json()
 
+        # Read the token header to identify its signing key
         unverified_header = jwt.get_unverified_header(token)
-
-        rsa_key = {}
+        rsa_key = None
 
         for key in jwks.get("keys", []):
             if key.get("kid") == unverified_header.get("kid"):
@@ -51,33 +59,43 @@ async def verify_clerk_token(
                 }
                 break
 
-        if rsa_key:
-            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
-
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                issuer=issuer,
-                options={
-                    "verify_aud": False
-                }
+        # Reject tokens whose signing key cannot be found
+        if not rsa_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unable to verify Clerk token",
+                headers={"WWW-Authenticate": "Bearer"}
             )
 
-            return payload
+        # Verify the signature, algorithm, and issuer
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(rsa_key)
 
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to verify Clerk token"
+        payload = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            issuer=CLERK_ISSUER_URL,
+            options={"verify_aud": False}
         )
+
+        # Ensure the token identifies a user
+        if not payload.get("sub"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload"
+            )
+
+        return payload
 
     except HTTPException:
         raise
 
     except Exception as e:
-        print(f"Token verification failed: {e}")
+        # Avoid returning internal verification details to clients
+        print(f"Clerk token verification failed: {type(e).__name__}")
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Clerk token"
+            detail="Invalid or expired Clerk token",
+            headers={"WWW-Authenticate": "Bearer"}
         )

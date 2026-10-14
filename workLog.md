@@ -447,3 +447,39 @@ The implementation is ready to be committed and pushed.
 98. Made timestamp metadata required in the frontend model.
 99. Supported reliable study-plan export formatting.
 100. Improved consistency between the database, FastAPI API, and Next.js frontend.
+
+
+## Task – Security & Database Schema Updates
+
+1. Reviewed the existing Clerk authentication implementation in `backend/auth.py`.
+2. Identified the unauthenticated mock authentication fallback.
+3. Removed the `dev_user_default` mock user fallback.
+4. Updated authentication to reject requests without a Bearer token.
+5. Added explicit handling for missing Clerk configuration.
+6. Preserved Clerk JWT signature and issuer verification.
+7. Added handling for invalid or unverifiable Clerk tokens.
+8. Ensured authentication failures return appropriate HTTP error responses.
+9. Reviewed the existing Smart Learning Planner database schema.
+10. Updated `backend/schema.sql` to include the `subjects` column in `student_profiles`.
+11. Configured the `subjects` column to use PostgreSQL's `TEXT[]` data type.
+12. Set an empty array as the default value for subjects.
+13. Applied the subjects column migration in Supabase.
+14. Verified the presence and data type of the new subjects column.
+15. Created the `tasks` table to support student task tracking.
+16. Added a UUID primary key to the tasks table.
+17. Linked tasks to the internal users table through a foreign key.
+18. Configured cascading deletion for tasks associated with a deleted user.
+19. Added title and description fields for task information.
+20. Added the `is_completed` field to track task completion status.
+21. Added the `completed_at` timestamp to record task completion time.
+22. Added `created_at` and `updated_at` timestamp fields.
+23. Created an index on `user_id` and `created_at` for efficient task retrieval.
+24. Enabled Row Level Security on the tasks table in Supabase.
+25. Added Clerk-based ownership policies for task access in the schema.
+26. Reviewed Row Level Security policies for student profiles and study plans.
+27. Aligned the schema's ownership checks with the Clerk user ID mapping.
+28. Maintained the relationship between Clerk identities and internal database user IDs.
+29. Prepared the updated authentication and database schema files for verification.
+30. Planned authentication tests for requests with missing, invalid, expired, and valid tokens.
+31. Planned database verification for the new subjects column and tasks table.
+32. Prepared the changes for version control and submission through a pull request.
