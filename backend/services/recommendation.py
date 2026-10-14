@@ -39,7 +39,6 @@ tfidf = TfidfVectorizer(
 
 tfidf_matrix = tfidf.fit_transform(df["combined_features"])
 
-print("TF-IDF matrix shape:", tfidf_matrix.shape)
 
 
 def recommend_courses(query, top_n=5):
@@ -90,3 +89,12 @@ def recommend_courses(query, top_n=5):
             break
 
     return recommendations
+
+
+
+def warmup_recommendation_cache():
+    """Verify that the course dataset and TF-IDF matrix are loaded."""
+    return {
+        "course_count": len(df),
+        "tfidf_shape": tfidf_matrix.shape,
+    }
