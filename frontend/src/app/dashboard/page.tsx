@@ -28,7 +28,7 @@ import {
   CalendarPlus,
   ExternalLink,
   GraduationCap,
-  Star
+  Star,
 } from "lucide-react";
 
 interface StatCardProps {
@@ -53,6 +53,7 @@ interface ScheduleTask {
   activity: string;
   duration_minutes: number;
   priority: "high" | "medium" | "low";
+  completed?: boolean;
 }
 
 interface ScheduleDay {
@@ -144,6 +145,10 @@ interface BackendSession {
   duration_hours: number;
   activity_type: string;
   priority: "high" | "medium" | "low";
+  id?: string;
+  completed?: boolean;
+  is_completed?: boolean;
+  status?: string;
 }
 
 interface BackendDaySchedule {
@@ -163,6 +168,7 @@ interface BackendPlanData {
   weekly_schedule?: BackendDaySchedule[];
   monthly_milestones?: MonthlyMilestone[];
   study_tips?: string[];
+  completed_task_ids?: string[];
 }
 
 interface PlanRecord {
@@ -205,13 +211,15 @@ function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[
 
     const tasks: ScheduleTask[] = (dayItem.sessions || []).map((sess, sessIdx) => {
       const durationMins = Math.round((sess.duration_hours || 1) * 60);
+      const isDone = Boolean(sess.completed || sess.is_completed || sess.status === "completed");
       return {
-        id: `live-d${dayNumber}-t${sessIdx + 1}`,
+        id: sess.id || `live-d${dayNumber}-t${sessIdx + 1}`,
         subject: sess.subject || "General Study",
         topic: sess.topic || "Core Topic",
         activity: formatActivityType(sess.activity_type),
         duration_minutes: durationMins,
         priority: sess.priority || "medium",
+        completed: isDone,
       };
     });
 
@@ -222,6 +230,33 @@ function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[
       tasks,
     };
   });
+}
+
+function normalizeRecommendation(item: any, index: number): RecommendedCourse {
+  const title = item.title || item.course_name || item["Course Name"] || item.name || "Recommended Course";
+  const provider = item.provider || item.university || item["University"] || "Online Course";
+
+  let rawDiff: "Beginner" | "Intermediate" | "Advanced" = "Beginner";
+  const diffStr = (item.difficulty || item.difficulty_level || item["Difficulty Level"] || "Beginner").toString().toLowerCase();
+  if (diffStr.includes("adv")) rawDiff = "Advanced";
+  else if (diffStr.includes("inter")) rawDiff = "Intermediate";
+  else rawDiff = "Beginner";
+
+  const rawRating = item.rating ?? item.course_rating ?? item["Course Rating"];
+  const parsedRating = typeof rawRating === "number" ? rawRating : parseFloat(rawRating) || 4.7;
+
+  const category = item.category || item.skills || item["Skills"] || item.subject || "Curated Resource";
+  const url = item.url || item.course_url || item["Course URL"] || item.link || "#";
+
+  return {
+    id: item.id ? String(item.id) : `rec-${index + 1}`,
+    title,
+    provider,
+    difficulty: rawDiff,
+    rating: Number(parsedRating.toFixed(1)),
+    category: typeof category === "string" ? category.split(",")[0].trim() : "Curated",
+    url,
+  };
 }
 
 export default function DashboardPage() {
@@ -249,33 +284,68 @@ export default function DashboardPage() {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  // Recommended Resources Simulated State (defaulting to true for now)
+  // Live Recommendations State from GET /api/v1/recommendations
+  const [recommendations, setRecommendations] = useState<RecommendedCourse[]>(RECOMMENDED_COURSES);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(true);
+  const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
 
-  // Simulate loading Coursera recommendations
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoadingRecommendations(false);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Load completed tasks & saved user profile from localStorage
+  // Load saved user profile from localStorage
   useEffect(() => {
     try {
-      const savedCompleted = localStorage.getItem("slp_completed_tasks");
-      if (savedCompleted) {
-        setCompletedTaskIds(JSON.parse(savedCompleted));
-      }
-
       const savedProfile = localStorage.getItem("slp_user_profile");
       if (savedProfile) {
         setUserProfile(JSON.parse(savedProfile));
       }
     } catch (e) {
-      console.error("Failed to load state from localStorage:", e);
+      console.error("Failed to load user profile from localStorage:", e);
     }
   }, []);
+
+  // Fetch live recommendations from GET /api/v1/recommendations with Clerk JWT
+  const fetchRecommendations = async () => {
+    setIsLoadingRecommendations(true);
+    setRecommendationsError(null);
+
+    try {
+      const token = await getToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/recommendations`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`GET /api/v1/recommendations returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      let recList: any[] = [];
+
+      if (Array.isArray(data)) {
+        recList = data;
+      } else if (Array.isArray(data.recommendations)) {
+        recList = data.recommendations;
+      } else if (Array.isArray(data.courses)) {
+        recList = data.courses;
+      } else if (Array.isArray(data.data)) {
+        recList = data.data;
+      } else if (Array.isArray(data.results)) {
+        recList = data.results;
+      }
+
+      if (recList.length > 0) {
+        setRecommendations(recList.map(normalizeRecommendation));
+      }
+    } catch (err: any) {
+      console.error("Error fetching live recommendations:", err);
+      setRecommendationsError(err.message || "Failed to load recommendations");
+    } finally {
+      setIsLoadingRecommendations(false);
+    }
+  };
 
   // Fetch live study plans from GET /api/v1/plans with Clerk JWT
   const fetchPlans = async () => {
@@ -333,6 +403,20 @@ export default function DashboardPage() {
               const mappedSchedule = parseWeeklySchedule(planData.weekly_schedule);
               setSchedule(mappedSchedule);
               setHasPlan(true);
+
+              // Initialize completed tasks from database if available
+              const planAny = planData as any;
+              if (Array.isArray(planAny.completed_task_ids)) {
+                setCompletedTaskIds(planAny.completed_task_ids);
+              } else {
+                const doneIds = mappedSchedule
+                  .flatMap((d) => d.tasks)
+                  .filter((t) => t.completed)
+                  .map((t) => t.id);
+                if (doneIds.length > 0) {
+                  setCompletedTaskIds((prev) => Array.from(new Set([...prev, ...doneIds])));
+                }
+              }
             }
           }
         } else {
@@ -351,7 +435,49 @@ export default function DashboardPage() {
     }
   };
 
-  // Call Khushi's POST /api/v1/ai/generate-plan endpoint to generate new 7-Day Study Plan with Gemini AI
+  // Database Persistence: Update task status via PATCH /api/v1/tasks/{id}/status
+  const toggleTaskCompletion = async (taskId: string) => {
+    const isCurrentlyCompleted = completedTaskIds.includes(taskId);
+    const nextCompleted = !isCurrentlyCompleted;
+
+    // 1. Optimistic UI update: update local React state immediately
+    setCompletedTaskIds((prev) =>
+      nextCompleted ? [...prev, taskId] : prev.filter((id) => id !== taskId)
+    );
+
+    // 2. Send PATCH request to backend with Clerk JWT
+    try {
+      const token = await getToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${encodeURIComponent(taskId)}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          status: nextCompleted ? "completed" : "pending",
+          is_completed: nextCompleted,
+          completed: nextCompleted,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`PATCH /api/v1/tasks/${taskId}/status returned status ${response.status}`);
+      }
+    } catch (err: any) {
+      console.error(`Failed to update task ${taskId} status:`, err);
+
+      // 3. Rollback / Revert local React state if API request fails
+      setCompletedTaskIds((prev) =>
+        isCurrentlyCompleted
+          ? (prev.includes(taskId) ? prev : [...prev, taskId])
+          : prev.filter((id) => id !== taskId)
+      );
+    }
+  };
+
+  // Call POST /api/v1/ai/generate-plan endpoint to generate new 7-Day Study Plan with Gemini AI
   const handleGeneratePlan = async () => {
     // Prevent duplicate triggers if generation is already in progress
     if (isGeneratingPlan) return;
@@ -424,8 +550,9 @@ export default function DashboardPage() {
           }
         }
 
-        // Automatically fetch live plans to render new interactive schedule grid
+        // Automatically fetch live plans and recommendations to render updated dashboard
         await fetchPlans();
+        await fetchRecommendations();
       } else {
         throw new Error("Plan generation completed but response payload was invalid.");
       }
@@ -443,30 +570,16 @@ export default function DashboardPage() {
   useEffect(() => {
     if (isAuthLoaded) {
       fetchPlans();
+      fetchRecommendations();
     } else {
       // Fallback timer if auth load takes long
       const timer = setTimeout(() => {
         setIsLoading(false);
+        setIsLoadingRecommendations(false);
       }, 1200);
       return () => clearTimeout(timer);
     }
   }, [isAuthLoaded, isSignedIn]);
-
-  // Save completed tasks to localStorage when state updates
-  const toggleTaskCompletion = (taskId: string) => {
-    setCompletedTaskIds((prev) => {
-      const next = prev.includes(taskId)
-        ? prev.filter((id) => id !== taskId)
-        : [...prev, taskId];
-
-      try {
-        localStorage.setItem("slp_completed_tasks", JSON.stringify(next));
-      } catch (e) {
-        console.error("Failed to save completed tasks to localStorage:", e);
-      }
-      return next;
-    });
-  };
 
   const toggleLoading = () => setIsLoading((prev) => !prev);
   const togglePlanState = () => setHasPlan((prev) => !prev);
@@ -547,7 +660,7 @@ export default function DashboardPage() {
   const activeSchedule = schedule;
   const allTasks = activeSchedule.flatMap((day) => day.tasks);
   const totalTasksCount = allTasks.length;
-  const completedTasksCount = completedTaskIds.filter(id => allTasks.some(t => t.id === id)).length;
+  const completedTasksCount = completedTaskIds.filter((id) => allTasks.some((t) => t.id === id)).length;
   const weeklyProgressPercent = totalTasksCount > 0
     ? Math.round((completedTasksCount / totalTasksCount) * 100)
     : 0;
@@ -620,12 +733,15 @@ export default function DashboardPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={fetchPlans}
-              disabled={isFetchingPlans}
+              onClick={() => {
+                fetchPlans();
+                fetchRecommendations();
+              }}
+              disabled={isFetchingPlans || isLoadingRecommendations}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-              title="Refresh live study plan data from backend API"
+              title="Refresh live study plan and recommendation data from backend API"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isFetchingPlans ? "animate-spin text-indigo-600" : ""}`} />
+              <RefreshCw className={`h-3.5 w-3.5 ${(isFetchingPlans || isLoadingRecommendations) ? "animate-spin text-indigo-600" : ""}`} />
               Refetch API
             </button>
             <Link
@@ -852,12 +968,13 @@ export default function DashboardPage() {
                     >
                       <span>{d.dayName}</span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${isSelected
+                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                          isSelected
                             ? "bg-indigo-700 text-indigo-100"
                             : isAllDone
                               ? "bg-emerald-100 text-emerald-700"
                               : "bg-slate-200 text-slate-600"
-                          }`}
+                        }`}
                       >
                         {isAllDone ? "✓" : `${dayDone}/${dayTasks.length}`}
                       </span>
@@ -902,7 +1019,7 @@ export default function DashboardPage() {
                           isCompleted
                             ? "bg-slate-50 border-slate-200 opacity-75"
                             : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
-                          }`}
+                        }`}
                       >
                         <div className="flex items-start gap-3 flex-1 min-w-0">
                           {/* Stateful Checkbox */}
@@ -1054,7 +1171,7 @@ export default function DashboardPage() {
           ) : (
             /* Horizontal Scrolling Coursera Course Cards Grid */
             <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4">
-              {RECOMMENDED_COURSES.map((course) => (
+              {recommendations.map((course) => (
                 <a
                   key={course.id}
                   href={course.url}
@@ -1277,4 +1394,3 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
     </main>
   );
 }
-

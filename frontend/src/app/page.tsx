@@ -134,9 +134,9 @@ export default function HomePage() {
               <div className="flex items-center justify-center w-14 h-14 mb-8 bg-white/10 rounded-2xl text-white group-hover:scale-110 transition-transform duration-500">
                 <LineChart className="w-7 h-7" />
               </div>
-              <h3 className="mb-4 text-3xl font-black tracking-tight text-white">Stateful Persistence</h3>
+              <h3 className="mb-4 text-3xl font-black tracking-tight text-white">Database Persistence</h3>
               <p className="max-w-md text-base leading-relaxed text-slate-400">
-                Check off daily milestones with interactive UI logic. Your progress is securely persisted across browser sessions locally, ensuring you never lose track of your week.
+                Check off daily milestones with interactive UI logic. Your progress is securely persisted to the database via real-time API syncing, ensuring you never lose track of your week across any device.
               </p>
             </div>
           </div>
