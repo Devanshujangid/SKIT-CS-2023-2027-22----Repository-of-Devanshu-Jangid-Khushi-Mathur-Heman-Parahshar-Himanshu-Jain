@@ -53,44 +53,81 @@ class RecommendationService:
             self.df["combined_features"]
         )
 
+    
     def recommend_courses(self, query: str, top_n: int = 5) -> list:
-        query_vector = self.tfidf.transform([query])
+        """Return relevant courses or an empty list when no match exists."""
 
-        scores = cosine_similarity(
-            query_vector,
-            self.tfidf_matrix
-        ).flatten()
+        if not isinstance(query, str) or not query.strip():
+            return []
 
-        # Return the highest-scoring courses first.
-        top_indices = scores.argsort()[-top_n:][::-1]
+        if not isinstance(top_n, int) or top_n < 1:
+            return []
 
-        recommendations = []
+        try:
+            query_vector = self.tfidf.transform([query.strip()])
 
-        for index in top_indices:
-            course = self.df.iloc[index]
+            scores = cosine_similarity(
+                query_vector,
+                self.tfidf_matrix
+            ).flatten()
 
-            recommendations.append({
-                "course_name": str(course["Course Name"]),
-                "university": (
-                    None if pd.isna(course["University"])
-                    else str(course["University"])
-                ),
-                "difficulty_level": (
-                    None if pd.isna(course["Difficulty Level"])
-                    else str(course["Difficulty Level"])
-                ),
-                "course_rating": (
-                    None if pd.isna(course["Course Rating"])
-                    else float(course["Course Rating"])
-                ),
-                "course_url": (
-                    None if pd.isna(course["Course URL"])
-                    else str(course["Course URL"])
-                ),
-                "similarity_score": float(scores[index]),
-            })
+            # No relevant course found.
+            if len(scores) == 0 or scores.max() < 0.10:
+                return []
 
-        return recommendations
+            ranked_indices = scores.argsort()[::-1]
+            recommendations = []
+
+            for index in ranked_indices:
+                score = float(scores[index])
+
+                # Skip courses with very low similarity.
+                if score < 0.10:
+                    break
+
+                course = self.df.iloc[index]
+                rating_value = course["Course Rating"]
+
+                # Handle ratings such as "Not Calibrated".
+                try:
+                    rating = (
+                        None if pd.isna(rating_value)
+                        else float(rating_value)
+                    )
+                except (TypeError, ValueError):
+                    rating = None
+
+                recommendations.append({
+                    "course_name": str(course["Course Name"]),
+                    "university": (
+                        None if pd.isna(course["University"])
+                        else str(course["University"])
+                    ),
+                    "difficulty_level": (
+                        None if pd.isna(course["Difficulty Level"])
+                        else str(course["Difficulty Level"])
+                    ),
+                    "course_rating": rating,
+                    "course_url": (
+                        None if pd.isna(course["Course URL"])
+                        else str(course["Course URL"])
+                    ),
+                    "similarity_score": score,
+                })
+
+                if len(recommendations) >= top_n:
+                    break
+
+            return recommendations
+
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Recommendation engine failed"
+            )
+            raise
+
 
 
 # Reuse one initialized service throughout this process.

@@ -1,5 +1,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+logger = logging.getLogger(__name__)
 
 from auth import verify_clerk_token
 from services.recommendation_service import recommendation_service
@@ -22,12 +25,14 @@ async def get_recommendations(
             status_code=401,
             detail="Authenticated user ID is missing"
         )
-
     try:
         results = recommendation_service.recommend_courses(
             query=query.strip(),
             top_n=top_n
         )
+
+        if results is None:
+            results = []
 
         return {
             "success": True,
@@ -35,7 +40,11 @@ async def get_recommendations(
             "recommendations": results
         }
 
+    except HTTPException:
+        raise
+
     except Exception:
+        logger.exception("Failed to generate course recommendations")
         raise HTTPException(
             status_code=500,
             detail="Failed to generate recommendations"
