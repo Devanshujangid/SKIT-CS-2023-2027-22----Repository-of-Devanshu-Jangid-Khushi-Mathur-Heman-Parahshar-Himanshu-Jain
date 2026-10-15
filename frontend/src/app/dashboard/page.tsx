@@ -1130,8 +1130,8 @@ export default function DashboardPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <div className="flex items-center gap-2">
-                <GraduationCap className="h-5 w-5 text-indigo-600" />
-                <h2 className="text-xl font-bold text-slate-900">Recommended Resources</h2>
+                <GraduationCap className="h-5 w-5 text-indigo-600 shrink-0" />
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900">Recommended Resources</h2>
               </div>
               <p className="mt-0.5 text-xs text-slate-500">
                 Curated Coursera courses aligned with your academic curriculum and study goals.
@@ -1147,11 +1147,11 @@ export default function DashboardPage() {
 
           {isLoadingRecommendations ? (
             /* Horizontal Scrolling Skeleton Loader */
-            <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4 animate-pulse">
+            <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 scroll-smooth animate-pulse">
               {[1, 2, 3, 4].map((i) => (
                 <div
                   key={i}
-                  className="shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs space-y-4"
+                  className="shrink-0 w-72 sm:w-80 md:w-84 rounded-2xl bg-white p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4"
                 >
                   <div className="flex items-center justify-between">
                     <div className="h-5 w-20 rounded-md bg-slate-200" />
@@ -1170,14 +1170,14 @@ export default function DashboardPage() {
             </div>
           ) : (
             /* Horizontal Scrolling Coursera Course Cards Grid */
-            <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4">
+            <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 scroll-smooth">
               {recommendations.map((course) => (
                 <a
                   key={course.id}
                   href={course.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs hover:shadow-md hover:border-indigo-300 transition-all flex flex-col justify-between whitespace-normal cursor-pointer"
+                  className="group shrink-0 w-72 sm:w-80 md:w-84 rounded-2xl bg-white p-4 sm:p-5 border border-slate-200 shadow-xs hover:shadow-md hover:border-indigo-300 transition-all flex flex-col justify-between whitespace-normal cursor-pointer"
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-3">
@@ -1191,13 +1191,13 @@ export default function DashboardPage() {
                       Coursera • {course.category}
                     </span>
 
-                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
+                    <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-snug">
                       {course.title}
                     </h3>
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                    <span className="truncate max-w-[170px]" title={course.provider}>
+                    <span className="truncate max-w-[140px] sm:max-w-[170px] md:max-w-[190px]" title={course.provider}>
                       {course.provider}
                     </span>
                     <span className="font-semibold text-slate-700 flex items-center gap-1 shrink-0">
@@ -1362,16 +1362,16 @@ function DashboardSkeleton({ onToggleLoading }: { onToggleLoading?: () => void }
         </section>
 
         {/* Recommended Resources Skeleton */}
-        <section className="space-y-4">
+        <section className="space-y-4 print:hidden">
           <div className="space-y-2">
             <div className="h-6 w-56 bg-slate-200 rounded-md" />
             <div className="h-4 w-80 bg-slate-200 rounded-md" />
           </div>
-          <div className="overflow-x-auto whitespace-nowrap flex gap-4 pb-4">
+          <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 scroll-smooth">
             {[1, 2, 3, 4].map((i) => (
               <div
                 key={i}
-                className="shrink-0 w-72 sm:w-80 rounded-2xl bg-white p-5 border border-slate-200 shadow-xs space-y-4"
+                className="shrink-0 w-72 sm:w-80 md:w-84 rounded-2xl bg-white p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4"
               >
                 <div className="flex items-center justify-between">
                   <div className="h-5 w-20 rounded-md bg-slate-200" />
