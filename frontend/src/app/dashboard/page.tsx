@@ -16,6 +16,7 @@ import AdaptiveScheduleBanner, {
 import FocusWeakTopicsWidget, {
   WeakTopicItem,
 } from "@/components/FocusWeakTopicsWidget";
+import E2EFlowTestModal from "@/components/E2EFlowTestModal";
 import {
   BookOpen,
   Clock,
@@ -313,6 +314,9 @@ export default function DashboardPage() {
   const [selectedTaskForExecution, setSelectedTaskForExecution] = useState<ScheduleTask | null>(null);
   const [taskExecutions, setTaskExecutions] = useState<Record<string, TaskExecutionData>>({});
   const [isSavingExecution, setIsSavingExecution] = useState<boolean>(false);
+
+  // E2E Flow Test Modal State
+  const [isE2EModalOpen, setIsE2EModalOpen] = useState<boolean>(false);
 
   // Adaptive Schedule Adjustment State
   const [adaptiveStatus, setAdaptiveStatus] = useState<{
@@ -1130,6 +1134,14 @@ export default function DashboardPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${(isFetchingPlans || isLoadingRecommendations) ? "animate-spin text-indigo-600" : ""}`} />
               Refetch API
             </button>
+            <button
+              onClick={() => setIsE2EModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 transition-colors shadow-xs cursor-pointer"
+              title="Run end-to-end flow test (Plan → Miss Task → Weak Topic → Targeted Recs → Re-balance)"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-purple-600" />
+              E2E Flow Test
+            </button>
             <Link
               href="/onboarding"
               className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
@@ -1736,6 +1748,13 @@ export default function DashboardPage() {
         }}
         onSave={handleSaveTaskExecution}
         isSaving={isSavingExecution}
+      />
+
+      {/* E2E Flow Test Interactive Modal */}
+      <E2EFlowTestModal
+        isOpen={isE2EModalOpen}
+        onClose={() => setIsE2EModalOpen(false)}
+        onExecuteE2E={handleTriggerRebalance}
       />
     </main>
   );

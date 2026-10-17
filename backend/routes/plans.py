@@ -183,11 +183,19 @@ def compute_weak_topics(plan_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "missed_minutes": deficit,
                 "planned_minutes": data["planned_minutes"],
                 "actual_minutes": data["actual_minutes"],
+                "missed_sessions": data["missed_sessions"],
                 "recommended_query": f"{data['subject']} {data['topic']}",
             })
 
-    # Sort high severity first
-    weak_topics.sort(key=lambda x: (x["severity"] == "high", x["missed_minutes"]), reverse=True)
+    # Sort explicitly missed topics and high severity first
+    weak_topics.sort(
+        key=lambda x: (
+            x.get("missed_sessions", 0) > 0,
+            x["severity"] == "high",
+            x["missed_minutes"],
+        ),
+        reverse=True,
+    )
     return weak_topics
 
 
