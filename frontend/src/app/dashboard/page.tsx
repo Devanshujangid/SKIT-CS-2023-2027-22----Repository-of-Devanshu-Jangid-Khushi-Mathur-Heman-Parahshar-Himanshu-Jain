@@ -13,6 +13,9 @@ import TaskExecutionModal, {
 import AdaptiveScheduleBanner, {
   MissedTaskDetail,
 } from "@/components/AdaptiveScheduleBanner";
+import FocusWeakTopicsWidget, {
+  WeakTopicItem,
+} from "@/components/FocusWeakTopicsWidget";
 import {
   BookOpen,
   Clock,
@@ -328,6 +331,11 @@ export default function DashboardPage() {
   const [isRebalancing, setIsRebalancing] = useState<boolean>(false);
   const [rebalanceNotification, setRebalanceNotification] = useState<string | null>(null);
 
+  // Weak Topics State
+  const [weakTopics, setWeakTopics] = useState<WeakTopicItem[]>([]);
+  const [isLoadingWeakTopics, setIsLoadingWeakTopics] = useState<boolean>(false);
+  const [activeRecommendationTopic, setActiveRecommendationTopic] = useState<string | null>(null);
+
   // Live Recommendations State from GET /api/v1/recommendations
   const [recommendations, setRecommendations] = useState<RecommendedCourse[]>(RECOMMENDED_COURSES);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(true);
@@ -346,14 +354,16 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch live recommendations from GET /api/v1/recommendations with Clerk JWT
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = async (customQuery?: string) => {
     setIsLoadingRecommendations(true);
     setRecommendationsError(null);
 
     try {
       const token = await getToken();
+      const defaultQuery = userProfile?.subjects?.[0] || planOverview?.primary_focus || "Computer Science";
+      const queryParam = encodeURIComponent((customQuery || defaultQuery).trim());
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/recommendations`, {
+      const response = await fetch(`${API_BASE_URL}/api/v1/recommendations?query=${queryParam}&top_n=6`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -582,8 +592,9 @@ export default function DashboardPage() {
 
       setIsExecutionModalOpen(false);
       setSelectedTaskForExecution(null);
-      // Re-evaluate adaptive status after task status changes
+      // Re-evaluate adaptive status and weak topics after task status changes
       fetchAdaptiveStatus();
+      fetchWeakTopics();
     } catch (err: any) {
       console.error(`Failed to update task ${taskId} execution:`, err);
       // Revert state if failed
@@ -702,6 +713,7 @@ export default function DashboardPage() {
       setRebalanceNotification(data.message || "Schedule rebalanced successfully!");
       await fetchPlans();
       await fetchAdaptiveStatus();
+      await fetchWeakTopics();
     } catch (err: any) {
       console.error("Failed to rebalance schedule via API:", err);
       // Local fallback rebalance
@@ -722,6 +734,130 @@ export default function DashboardPage() {
       setRebalanceNotification("Schedule rebalanced locally! Catch-up sessions scheduled.");
     } finally {
       setIsRebalancing(false);
+    }
+  };
+
+  // Derive client-side weak topics with deterministic explainability tags
+  const deriveClientWeakTopics = () => {
+    const topicMap: Record<string, any> = {};
+
+    schedule.forEach((dayItem) => {
+      dayItem.tasks.forEach((task) => {
+        const key = `${task.subject}::${task.topic}`;
+        const exec = taskExecutions[task.id];
+        const isDone = completedTaskIds.includes(task.id) || exec?.status === "completed";
+        const actualMins = exec?.actual_minutes ?? (isDone ? task.duration_minutes : 0);
+
+        if (!topicMap[key]) {
+          topicMap[key] = {
+            id: `client-wt-${task.id}`,
+            subject: task.subject,
+            topic: task.topic,
+            planned_minutes: 0,
+            actual_minutes: 0,
+            total_sessions: 0,
+            completed_sessions: 0,
+            missed_sessions: 0,
+            priority: task.priority,
+          };
+        }
+
+        topicMap[key].planned_minutes += task.duration_minutes;
+        topicMap[key].actual_minutes += actualMins;
+        topicMap[key].total_sessions += 1;
+        if (isDone) {
+          topicMap[key].completed_sessions += 1;
+        } else if (exec?.status === "missed") {
+          topicMap[key].missed_sessions += 1;
+        }
+      });
+    });
+
+    const list: WeakTopicItem[] = [];
+    Object.values(topicMap).forEach((t: any) => {
+      const tags: string[] = [];
+      let isWeak = false;
+      let severity: "high" | "medium" | "low" = "low";
+      const deficit = Math.max(0, t.planned_minutes - t.actual_minutes);
+
+      if (t.missed_sessions > 0) {
+        isWeak = true;
+        severity = "high";
+        tags.push(`Missed Task: ${t.topic}`);
+      }
+      if (deficit >= 30) {
+        isWeak = true;
+        if (deficit >= 60) severity = "high";
+        tags.push(`Study Deficit: -${deficit}m`);
+      }
+      if (t.total_sessions > 0) {
+        const compRate = Math.round((t.completed_sessions / t.total_sessions) * 100);
+        if (compRate < 50 && t.completed_sessions < t.total_sessions) {
+          isWeak = true;
+          tags.push(`Completion Rate: ${compRate}% (Low Mastery)`);
+        }
+      }
+      if (t.priority === "high" && isWeak) {
+        tags.push("High Priority Exam Subject");
+      }
+
+      if (isWeak) {
+        list.push({
+          id: t.id,
+          subject: t.subject,
+          topic: t.topic,
+          status: "Needs Revision",
+          severity,
+          explainability_tags: tags,
+          missed_minutes: deficit,
+          planned_minutes: t.planned_minutes,
+          actual_minutes: t.actual_minutes,
+          recommended_query: `${t.subject} ${t.topic}`,
+        });
+      }
+    });
+
+    list.sort((a, b) => (b.severity === "high" ? 1 : 0) - (a.severity === "high" ? 1 : 0));
+    setWeakTopics(list);
+  };
+
+  // Fetch weak topics from GET /api/v1/plans/weak-topics with Clerk JWT
+  const fetchWeakTopics = async () => {
+    setIsLoadingWeakTopics(true);
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans/weak-topics`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && Array.isArray(data.weak_topics)) {
+          setWeakTopics(data.weak_topics);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch weak topics from backend:", err);
+    } finally {
+      setIsLoadingWeakTopics(false);
+    }
+
+    // Fallback deterministic client derivation
+    deriveClientWeakTopics();
+  };
+
+  // Handle clicking "Find Targeted Resources" on a weak topic card
+  const handleSelectWeakTopicForRecommendations = async (query: string) => {
+    setActiveRecommendationTopic(query);
+    await fetchRecommendations(query);
+    const recSection = document.getElementById("recommendations-section");
+    if (recSection) {
+      recSection.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -820,6 +956,7 @@ export default function DashboardPage() {
       fetchPlans();
       fetchRecommendations();
       fetchAdaptiveStatus();
+      fetchWeakTopics();
     } else {
       // Fallback timer if auth load takes long
       const timer = setTimeout(() => {
@@ -1454,8 +1591,17 @@ export default function DashboardPage() {
           </section>
         )}
 
+        {/* Focus & Weak Topics Dashboard Widget */}
+        <div className="print:hidden">
+          <FocusWeakTopicsWidget
+            weakTopics={weakTopics}
+            onSelectTopicForRecommendations={handleSelectWeakTopicForRecommendations}
+            isLoading={isLoadingWeakTopics}
+          />
+        </div>
+
         {/* Recommended Resources UI Section (Coursera Courses) */}
-        <section className="space-y-4 print:hidden">
+        <section id="recommendations-section" className="space-y-4 print:hidden">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <div className="flex items-center gap-2">
@@ -1465,6 +1611,22 @@ export default function DashboardPage() {
               <p className="mt-0.5 text-xs text-slate-500">
                 Curated Coursera courses aligned with your academic curriculum and study goals.
               </p>
+              {activeRecommendationTopic && (
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700 animate-in fade-in duration-200">
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Targeted for: <strong>{activeRecommendationTopic}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveRecommendationTopic(null);
+                      fetchRecommendations();
+                    }}
+                    className="ml-1 text-indigo-600 hover:text-indigo-900 underline font-bold cursor-pointer"
+                  >
+                    Reset to All
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

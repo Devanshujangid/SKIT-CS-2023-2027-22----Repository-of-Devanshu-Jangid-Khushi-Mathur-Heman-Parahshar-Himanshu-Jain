@@ -80,6 +80,169 @@ def find_missed_tasks(plan_data: Dict[str, Any], current_day_idx: int = 2) -> Li
     return missed
 
 
+def compute_weak_topics(plan_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Deterministically computes weak topics and subjects needing revision,
+    producing rule-based explainability tags.
+    """
+    weekly_schedule = plan_data.get("weekly_schedule") or []
+    completed_ids = set(plan_data.get("completed_task_ids") or [])
+    executions = plan_data.get("task_executions") or {}
+
+    subject_map: Dict[str, Dict[str, Any]] = {}
+
+    for day_idx, day_item in enumerate(weekly_schedule, start=1):
+        sessions = day_item.get("sessions") or []
+        for s_idx, sess in enumerate(sessions, start=1):
+            subject = sess.get("subject", "General Study")
+            topic = sess.get("topic", "Core Topic")
+            sess_id = sess.get("id") or f"live-d{day_idx}-t{s_idx}"
+            planned_mins = int((sess.get("duration_hours") or 1.0) * 60)
+            exec_info = executions.get(sess_id) or {}
+            exec_status = exec_info.get("status")
+
+            if exec_status == "completed" or sess_id in completed_ids:
+                actual_mins = exec_info.get("actual_minutes", planned_mins)
+                is_done = True
+            elif exec_status == "partially_completed":
+                actual_mins = exec_info.get("actual_minutes", int(planned_mins / 2))
+                is_done = False
+            elif exec_status == "missed":
+                actual_mins = 0
+                is_done = False
+            else:
+                actual_mins = 0
+                is_done = False
+
+            key = f"{subject}::{topic}"
+            if key not in subject_map:
+                subject_map[key] = {
+                    "id": f"wt-{sess_id}",
+                    "subject": subject,
+                    "topic": topic,
+                    "planned_minutes": 0,
+                    "actual_minutes": 0,
+                    "total_sessions": 0,
+                    "completed_sessions": 0,
+                    "missed_sessions": 0,
+                    "partial_sessions": 0,
+                    "priority": sess.get("priority", "medium"),
+                }
+
+            entry = subject_map[key]
+            entry["planned_minutes"] += planned_mins
+            entry["actual_minutes"] += actual_mins
+            entry["total_sessions"] += 1
+            if is_done:
+                entry["completed_sessions"] += 1
+            elif exec_status == "missed":
+                entry["missed_sessions"] += 1
+            elif exec_status == "partially_completed":
+                entry["partial_sessions"] += 1
+
+    weak_topics: List[Dict[str, Any]] = []
+    for key, data in subject_map.items():
+        tags: List[str] = []
+        is_needs_revision = False
+        severity = "low"
+        deficit = max(0, data["planned_minutes"] - data["actual_minutes"])
+
+        # Deterministic Explainability Rules:
+        # Rule 1: Explicitly missed session
+        if data["missed_sessions"] > 0:
+            is_needs_revision = True
+            severity = "high"
+            tags.append(f"Missed Task: {data['topic']}")
+
+        # Rule 2: Substantial study deficit
+        if deficit >= 30:
+            is_needs_revision = True
+            if deficit >= 60:
+                severity = "high"
+            tags.append(f"Study Deficit: -{deficit}m")
+
+        # Rule 3: Low completion rate with incomplete sessions
+        if data["total_sessions"] > 0:
+            comp_rate = int((data["completed_sessions"] / data["total_sessions"]) * 100)
+            if comp_rate < 50 and data["completed_sessions"] < data["total_sessions"]:
+                is_needs_revision = True
+                tags.append(f"Completion Rate: {comp_rate}% (Low Mastery)")
+
+        # Rule 4: High priority subject
+        if data["priority"] == "high" and is_needs_revision:
+            tags.append("High Priority Exam Target")
+
+        if is_needs_revision:
+            weak_topics.append({
+                "id": data["id"],
+                "subject": data["subject"],
+                "topic": data["topic"],
+                "status": "Needs Revision",
+                "severity": severity,
+                "explainability_tags": tags,
+                "missed_minutes": deficit,
+                "planned_minutes": data["planned_minutes"],
+                "actual_minutes": data["actual_minutes"],
+                "recommended_query": f"{data['subject']} {data['topic']}",
+            })
+
+    # Sort high severity first
+    weak_topics.sort(key=lambda x: (x["severity"] == "high", x["missed_minutes"]), reverse=True)
+    return weak_topics
+
+
+@router.get("/weak-topics")
+async def get_weak_topics(
+    user_data: dict = Depends(verify_clerk_token),
+):
+    """
+    Deterministically computes subjects and topics flagged as Needs Revision with explainability tags.
+    """
+    clerk_id = user_data.get("sub")
+    if not clerk_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user Clerk ID is missing",
+        )
+
+    try:
+        db = get_db()
+        user_res = db.table("users").select("id").eq("clerk_id", clerk_id).limit(1).execute()
+        if not user_res.data:
+            return {"success": True, "count": 0, "weak_topics": []}
+
+        user_id = user_res.data[0]["id"]
+        plan_res = (
+            db.table("study_plans")
+            .select("id, plan_data")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if not plan_res.data:
+            return {"success": True, "count": 0, "weak_topics": []}
+
+        plan_data = plan_res.data[0].get("plan_data") or {}
+        weak_topics = compute_weak_topics(plan_data)
+
+        return {
+            "success": True,
+            "count": len(weak_topics),
+            "weak_topics": weak_topics,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to get weak topics")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to compute weak topics",
+        ) from exc
+
+
 @router.get("")
 async def get_plans(
     user_data: dict = Depends(verify_clerk_token),
