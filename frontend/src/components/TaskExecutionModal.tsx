@@ -15,7 +15,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-export type TaskExecutionStatus = "completed" | "partially_completed" | "missed";
+export type TaskExecutionStatus = "completed" | "partially_completed" | "missed" | "rebalanced";
 
 export interface TaskExecutionData {
   status: TaskExecutionStatus;

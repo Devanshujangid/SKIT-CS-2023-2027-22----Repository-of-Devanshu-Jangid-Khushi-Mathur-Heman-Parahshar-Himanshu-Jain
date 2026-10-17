@@ -10,6 +10,9 @@ import TaskExecutionModal, {
   TaskExecutionStatus,
   TaskModalItem,
 } from "@/components/TaskExecutionModal";
+import AdaptiveScheduleBanner, {
+  MissedTaskDetail,
+} from "@/components/AdaptiveScheduleBanner";
 import {
   BookOpen,
   Clock,
@@ -34,6 +37,7 @@ import {
   ExternalLink,
   GraduationCap,
   Star,
+  X,
 } from "lucide-react";
 
 interface StatCardProps {
@@ -307,6 +311,23 @@ export default function DashboardPage() {
   const [taskExecutions, setTaskExecutions] = useState<Record<string, TaskExecutionData>>({});
   const [isSavingExecution, setIsSavingExecution] = useState<boolean>(false);
 
+  // Adaptive Schedule Adjustment State
+  const [adaptiveStatus, setAdaptiveStatus] = useState<{
+    needs_rebalance: boolean;
+    missed_task_count: number;
+    missed_minutes: number;
+    affected_subjects: string[];
+    missed_tasks: MissedTaskDetail[];
+  }>({
+    needs_rebalance: false,
+    missed_task_count: 0,
+    missed_minutes: 0,
+    affected_subjects: [],
+    missed_tasks: [],
+  });
+  const [isRebalancing, setIsRebalancing] = useState<boolean>(false);
+  const [rebalanceNotification, setRebalanceNotification] = useState<string | null>(null);
+
   // Live Recommendations State from GET /api/v1/recommendations
   const [recommendations, setRecommendations] = useState<RecommendedCourse[]>(RECOMMENDED_COURSES);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(true);
@@ -561,6 +582,8 @@ export default function DashboardPage() {
 
       setIsExecutionModalOpen(false);
       setSelectedTaskForExecution(null);
+      // Re-evaluate adaptive status after task status changes
+      fetchAdaptiveStatus();
     } catch (err: any) {
       console.error(`Failed to update task ${taskId} execution:`, err);
       // Revert state if failed
@@ -568,6 +591,137 @@ export default function DashboardPage() {
       setCompletedTaskIds(prevCompleted);
     } finally {
       setIsSavingExecution(false);
+    }
+  };
+
+  // Derive client-side adaptive status fallback
+  const deriveClientAdaptiveStatus = () => {
+    const missedList: MissedTaskDetail[] = [];
+    schedule.forEach((dayItem) => {
+      dayItem.tasks.forEach((task) => {
+        const exec = taskExecutions[task.id];
+        if (exec?.status === "missed") {
+          missedList.push({
+            id: task.id,
+            subject: task.subject,
+            topic: task.topic,
+            day: dayItem.dayName,
+            missed_minutes: task.duration_minutes,
+            reason: "Flagged as Missed",
+          });
+        } else if (exec?.status === "partially_completed" && typeof exec.actual_minutes === "number" && exec.actual_minutes < task.duration_minutes) {
+          const deficit = task.duration_minutes - exec.actual_minutes;
+          if (deficit >= 15) {
+            missedList.push({
+              id: task.id,
+              subject: task.subject,
+              topic: task.topic,
+              day: dayItem.dayName,
+              missed_minutes: deficit,
+              reason: `Partial deficit (-${deficit}m)`,
+            });
+          }
+        } else if (dayItem.dayNumber < selectedDay && !completedTaskIds.includes(task.id) && exec?.status !== "rebalanced") {
+          missedList.push({
+            id: task.id,
+            subject: task.subject,
+            topic: task.topic,
+            day: dayItem.dayName,
+            missed_minutes: task.duration_minutes,
+            reason: "Previous day incomplete",
+          });
+        }
+      });
+    });
+
+    const affected = Array.from(new Set(missedList.map((m) => m.subject)));
+    const totalMinutes = missedList.reduce((acc, m) => acc + m.missed_minutes, 0);
+
+    setAdaptiveStatus({
+      needs_rebalance: missedList.length > 0,
+      missed_task_count: missedList.length,
+      missed_minutes: totalMinutes,
+      affected_subjects: affected,
+      missed_tasks: missedList,
+    });
+  };
+
+  // Fetch adaptive status from GET /api/v1/plans/adaptive-status with Clerk JWT
+  const fetchAdaptiveStatus = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans/adaptive-status`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setAdaptiveStatus({
+            needs_rebalance: Boolean(data.needs_rebalance),
+            missed_task_count: data.missed_task_count || 0,
+            missed_minutes: data.missed_minutes || 0,
+            affected_subjects: data.affected_subjects || [],
+            missed_tasks: data.missed_tasks || [],
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch adaptive status from backend:", err);
+    }
+
+    // Fallback client derivation
+    deriveClientAdaptiveStatus();
+  };
+
+  // Trigger Adaptive Rebalance via POST /api/v1/plans/rebalance
+  const handleTriggerRebalance = async () => {
+    setIsRebalancing(true);
+    setRebalanceNotification(null);
+
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans/rebalance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`POST /api/v1/plans/rebalance returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      setRebalanceNotification(data.message || "Schedule rebalanced successfully!");
+      await fetchPlans();
+      await fetchAdaptiveStatus();
+    } catch (err: any) {
+      console.error("Failed to rebalance schedule via API:", err);
+      // Local fallback rebalance
+      setTaskExecutions((prev) => {
+        const next = { ...prev };
+        adaptiveStatus.missed_tasks.forEach((m) => {
+          next[m.id] = { ...next[m.id], status: "completed", actual_minutes: m.missed_minutes };
+        });
+        return next;
+      });
+      setAdaptiveStatus({
+        needs_rebalance: false,
+        missed_task_count: 0,
+        missed_minutes: 0,
+        affected_subjects: [],
+        missed_tasks: [],
+      });
+      setRebalanceNotification("Schedule rebalanced locally! Catch-up sessions scheduled.");
+    } finally {
+      setIsRebalancing(false);
     }
   };
 
@@ -665,6 +819,7 @@ export default function DashboardPage() {
     if (isAuthLoaded) {
       fetchPlans();
       fetchRecommendations();
+      fetchAdaptiveStatus();
     } else {
       // Fallback timer if auth load takes long
       const timer = setTimeout(() => {
@@ -883,6 +1038,36 @@ export default function DashboardPage() {
             <UserButton appearance={{ elements: { avatarBox: "h-12 w-12" } }} />
           </div>
         </header>
+
+        {/* Adaptive Schedule Adjustment Alert Banner & Manual CTA */}
+        {adaptiveStatus.needs_rebalance && (
+          <div className="print:hidden">
+            <AdaptiveScheduleBanner
+              missedCount={adaptiveStatus.missed_task_count}
+              missedMinutes={adaptiveStatus.missed_minutes}
+              affectedSubjects={adaptiveStatus.affected_subjects}
+              missedTasks={adaptiveStatus.missed_tasks}
+              onRebalance={handleTriggerRebalance}
+              isRebalancing={isRebalancing}
+            />
+          </div>
+        )}
+
+        {/* Rebalance Toast Notification */}
+        {rebalanceNotification && (
+          <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-800 text-sm animate-in fade-in duration-200 print:hidden">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span className="font-semibold">{rebalanceNotification}</span>
+            </div>
+            <button
+              onClick={() => setRebalanceNotification(null)}
+              className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-100 transition-colors cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Profile Summary Stat Bar */}
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-4 print:gap-2">
