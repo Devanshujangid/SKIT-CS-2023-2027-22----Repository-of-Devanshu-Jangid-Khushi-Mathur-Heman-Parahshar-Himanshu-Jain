@@ -47,8 +47,13 @@ CREATE TABLE IF NOT EXISTS public.study_plans (
     plan_data JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    CONSTRAINT unique_user_study_plan UNIQUE (user_id)
 );
+
+-- Migration for existing databases
+ALTER TABLE public.study_plans
+ADD CONSTRAINT unique_user_study_plan UNIQUE (user_id);
 
 CREATE INDEX IF NOT EXISTS idx_study_plans_user_active_created
 ON public.study_plans(user_id, is_active, created_at DESC);

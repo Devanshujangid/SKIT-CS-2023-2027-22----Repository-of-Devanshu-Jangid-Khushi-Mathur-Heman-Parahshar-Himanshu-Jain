@@ -1,9 +1,11 @@
 
+import logging
+import os
 from typing import List, Optional, Union
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from auth import verify_clerk_token
 from database import get_db
@@ -13,6 +15,8 @@ from routes import export
 from routes.tasks import router as tasks_router
 from routes.recommendations import router as recommendations_router
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Smart Learning Planner API")
 
@@ -21,9 +25,18 @@ app = FastAPI(title="Smart Learning Planner API")
 # CORS CONFIGURATION
 # ============================================================
 
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,7 +63,7 @@ class ProfileCreateRequest(BaseModel):
     semester: int
     study_hours_per_day: float
     goals: Union[str, List[str]]
-    subjects: List[str] = []
+    subjects: List[str] = Field(default_factory=list)
 
 
 # ============================================================
@@ -171,12 +184,12 @@ async def create_or_update_profile(
     except HTTPException:
         raise
 
-    except Exception:
-        # Do not return fake success when database operations fail.
+    except Exception as exc:
+        logger.exception("Failed to save student profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save student profile"
-        )
+            detail="Failed to save student profile",
+        ) from exc
 
 
 # ============================================================

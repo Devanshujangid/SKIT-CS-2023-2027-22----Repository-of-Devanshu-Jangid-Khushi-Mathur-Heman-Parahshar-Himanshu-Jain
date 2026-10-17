@@ -27,7 +27,7 @@ from prompts.study_plan import (
     StudyPlanOutputSchema,
 )
 from auth import verify_clerk_token
-from database import save_study_plan
+
 
 
 load_dotenv()
@@ -287,7 +287,20 @@ async def get_generation_status(
 # -----------------------------
 
 @router.post("/test")
-async def test_ai(request: TestPromptRequest):
+async def test_ai(
+    request: TestPromptRequest,
+    user_data: dict = Depends(verify_clerk_token)
+):
+    clerk_id = user_data.get("sub")
+
+    if not clerk_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user Clerk ID is missing",
+        )
+
+    check_gemini_rate_limit(clerk_id)
+
     try:
         response_text = generate_gemini_response(request.prompt)
 
@@ -297,6 +310,8 @@ async def test_ai(request: TestPromptRequest):
             "response": response_text,
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("AI test endpoint failed")
 
@@ -327,7 +342,10 @@ async def generate_study_plan(
         clerk_id = user_data.get("sub")
 
         if not clerk_id:
-            raise RuntimeError("Authenticated user Clerk ID is missing")
+            raise HTTPException(
+                status_code=401,
+                detail="Authenticated user Clerk ID is missing",
+            )
 
         check_gemini_rate_limit(clerk_id)
 
@@ -348,8 +366,8 @@ async def generate_study_plan(
 
         raise HTTPException(
             status_code=500,
-            detail=str(exc)
-        )
+            detail="Study plan generation failed",
+        ) from exc
 
 
 # -----------------------------
@@ -371,8 +389,13 @@ async def regenerate_study_plan(
         clerk_id = user_data.get("sub")
 
         if not clerk_id:
-            raise RuntimeError("Authenticated user Clerk ID is missing")
+            raise HTTPException(
+                status_code=401,
+                detail="Authenticated user Clerk ID is missing",
+            )
 
+        check_gemini_rate_limit(clerk_id)
+            
         # Construct RegenerationInput context combining current plan history and user tweak feedback
         regeneration_input = RegenerationInput(
             current_plan=request.current_plan,
@@ -397,11 +420,13 @@ async def regenerate_study_plan(
             "model": model,
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Study plan regeneration failed")
 
         raise HTTPException(
             status_code=500,
-            detail=str(exc)
-        )
+            detail="Study plan regeneration failed",
+        ) from exc
 
