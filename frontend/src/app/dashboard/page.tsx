@@ -308,15 +308,34 @@ export default function DashboardPage() {
 
     try {
       const token = await getToken();
+      if (!token) {
+    throw new Error("Please sign in again to load recommendations.");
+  }
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/recommendations`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+  const savedProfile = localStorage.getItem("slp_user_profile");
+  const profile = savedProfile ? JSON.parse(savedProfile) : null;
 
+  const subjects = Array.isArray(profile?.subjects)
+    ? profile.subjects
+    : [];
+
+  const query = subjects.join(" ").trim();
+
+  if (!query) {
+    setRecommendations([]);
+    return;
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/recommendations?query=${encodeURIComponent(query)}&top_n=5`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
       if (!response.ok) {
         throw new Error(`GET /api/v1/recommendations returned status ${response.status}`);
       }
@@ -444,6 +463,14 @@ export default function DashboardPage() {
     setCompletedTaskIds((prev) =>
       nextCompleted ? [...prev, taskId] : prev.filter((id) => id !== taskId)
     );
+
+    
+     console.log("Task clicked:", taskId);
+     // Temporary tasks are not saved in the database.
+    if (String(taskId).startsWith("live-d")) {
+      console.log("Temporary task — PATCH skipped:", taskId);
+    return;
+    }
 
     // 2. Send PATCH request to backend with Clerk JWT
     try {
