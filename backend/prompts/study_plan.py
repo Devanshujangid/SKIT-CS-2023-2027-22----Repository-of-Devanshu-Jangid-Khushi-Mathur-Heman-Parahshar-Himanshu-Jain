@@ -208,7 +208,10 @@ JSON SCHEMA SPECIFICATION:
 """
 
 
-def build_study_plan_prompt(data: OnboardingDataInput) -> str:
+def build_study_plan_prompt(
+    data: OnboardingDataInput,
+    learning_history: dict | None = None,
+) -> str:
     """
     Constructs the deterministic user prompt with serialized onboarding data.
     """

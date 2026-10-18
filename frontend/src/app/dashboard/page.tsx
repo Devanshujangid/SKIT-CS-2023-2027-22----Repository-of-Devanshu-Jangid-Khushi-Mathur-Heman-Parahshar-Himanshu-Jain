@@ -364,17 +364,30 @@ export default function DashboardPage() {
 
     try {
       const token = await getToken();
-      const defaultQuery = userProfile?.subjects?.[0] || planOverview?.primary_focus || "Computer Science";
-      const queryParam = encodeURIComponent((customQuery || defaultQuery).trim());
+      const savedProfile = typeof window !== "undefined" ? localStorage.getItem("slp_user_profile") : null;
+      const profile = savedProfile ? JSON.parse(savedProfile) : null;
+      const profileSubjects = Array.isArray(profile?.subjects)
+        ? profile.subjects
+        : (userProfile?.subjects || []);
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/recommendations?query=${queryParam}&top_n=6`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+      const defaultQuery = profileSubjects.join(" ").trim() || planOverview?.primary_focus || "Computer Science";
+      const targetQuery = (customQuery || defaultQuery).trim();
 
+      if (!targetQuery) {
+        setRecommendations([]);
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/recommendations?query=${encodeURIComponent(targetQuery)}&top_n=6`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
+      );
       if (!response.ok) {
         throw new Error(`GET /api/v1/recommendations returned status ${response.status}`);
       }
@@ -508,6 +521,14 @@ export default function DashboardPage() {
     setCompletedTaskIds((prev) =>
       nextCompleted ? [...prev, taskId] : prev.filter((id) => id !== taskId)
     );
+
+    
+     console.log("Task clicked:", taskId);
+     // Temporary tasks are not saved in the database.
+    if (String(taskId).startsWith("live-d")) {
+      console.log("Temporary task — PATCH skipped:", taskId);
+    return;
+    }
 
     // 2. Send PATCH request to backend with Clerk JWT
     try {
