@@ -51,6 +51,7 @@ export default function OnboardingPage() {
     setIsGeneratingPlan(true);
 
     const payload = {
+      email: user?.primaryEmailAddress?.emailAddress,
       semester: parseInt(formData.semester) || 1,
       study_hours_per_day: parseFloat(formData.study_hours_per_day) || 4,
       goals: formData.goals,
@@ -77,9 +78,13 @@ export default function OnboardingPage() {
         body: JSON.stringify(payload),
       });
 
-      if (!profileRes.ok) {
-        console.warn("Backend profile save API returned non-200, continuing with plan generation.");
-      }
+      
+     if (!profileRes.ok) {
+     const errorText = await profileRes.text();
+     console.error("Profile save failed:", profileRes.status, errorText);
+     throw new Error(`Profile save failed (${profileRes.status}): ${errorText}`);
+     }
+
 
       // 2. Generate 7-Day Study Plan with Khushi's endpoint POST /api/v1/ai/generate-plan
       const aiRes = await fetch(`${API_BASE_URL}/api/v1/ai/generate-plan`, {
@@ -323,4 +328,4 @@ export default function OnboardingPage() {
     </main>
   );
 }
-
+
