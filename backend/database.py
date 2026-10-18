@@ -87,3 +87,69 @@ def upsert_study_plan(clerk_id: str, plan_data: dict, email: str | None = None):
 
 
 save_study_plan = upsert_study_plan
+
+
+def save_plan_tasks(clerk_id: str, plan_data: dict):
+    """Save generated weekly study sessions without duplicating existing tasks."""
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    db = get_db()
+
+    user_res = (
+        db.table("users")
+        .select("id")
+        .eq("clerk_id", clerk_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not user_res.data:
+        raise ValueError("User not found while saving plan tasks")
+
+    user_id = user_res.data[0]["id"]
+
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    monday = today - timedelta(days=today.weekday())
+
+    weekly_schedule = plan_data.get("weekly_schedule", [])
+
+    for day_index, day_data in enumerate(weekly_schedule):
+        day_name = day_data.get("day", "")
+        day_name = getattr(day_name, "value", day_name)
+
+        scheduled_date = monday + timedelta(days=day_index)
+
+        for session_index, session in enumerate(day_data.get("sessions", [])):
+            subject = session.get("subject", "General Study")
+            topic = session.get("topic", "Study Session")
+            session_key = (
+                f"{monday.isoformat()}-"
+                f"{day_index}-{session_index}"
+            )
+
+            existing = (
+                db.table("tasks")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("plan_session_key", session_key)
+                .limit(1)
+                .execute()
+            )
+
+            if existing.data:
+                continue
+
+            duration = session.get("duration_hours", 0)
+            description = (
+                f"{topic} | Duration: {duration} hours"
+            )
+
+            db.table("tasks").insert({
+                "user_id": user_id,
+                "title": f"{subject}: {topic}",
+                "description": description,
+                "scheduled_date": scheduled_date.isoformat(),
+                "plan_session_key": session_key,
+                "is_completed": False,
+            }).execute()

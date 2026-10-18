@@ -195,7 +195,7 @@ async def update_task_status(
                 .eq("id", id)
                 .eq("user_id", user_id)
                 .select(
-                    "id, user_id, title, is_completed, completed_at, updated_at"
+                    "id, user_id, title, description,is_completed,scheduled_date, completed_at, updated_at"
                 )
                 .execute()
             )

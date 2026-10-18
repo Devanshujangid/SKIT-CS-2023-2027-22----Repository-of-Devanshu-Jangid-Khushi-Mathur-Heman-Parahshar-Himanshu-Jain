@@ -14,7 +14,9 @@ from google import genai
 from google.genai import types
 
 from database import save_study_plan
+from database import save_plan_tasks
 from rate_limit import check_gemini_rate_limit
+from services.learning_loop import get_learning_loop_payload
 
 from prompts.study_plan import (
     OnboardingDataInput,
@@ -229,6 +231,7 @@ def generate_and_save_plan(
         raw_plan = extract_json(response_text)
         validated_plan = validate_study_plan_output(raw_plan)
         print(">>> PLAN VALIDATED", flush=True)
+        plan_data = validated_plan.model_dump()
 
         save_study_plan(
             clerk_id=clerk_id,
@@ -239,6 +242,12 @@ def generate_and_save_plan(
             "status": "completed",
             "message": "Study plan generated successfully."
         }
+        save_plan_tasks(
+          clerk_id=clerk_id,
+          plan_data=plan_data
+         )
+        print(">>> PLAN TASKS SAVED TO DATABASE", flush=True)
+
         logger.info(
             "Background study plan generation completed successfully"
         )
@@ -325,19 +334,15 @@ async def test_ai(
 # Generate Study Plan Endpoint
 # -----------------------------
 
+
 @router.post("/generate-plan")
 async def generate_study_plan(
     request: GeneratePlanRequest,
     background_tasks: BackgroundTasks,
-    user_data: dict = Depends(verify_clerk_token)
+    user_data: dict = Depends(verify_clerk_token),
 ):
     try:
         onboarding_data = request.onboarding_data
-
-        user_prompt = build_study_plan_prompt(onboarding_data)
-
-        model = get_target_model()
-
 
         clerk_id = user_data.get("sub")
 
@@ -347,10 +352,23 @@ async def generate_study_plan(
                 detail="Authenticated user Clerk ID is missing",
             )
 
+        learning_history = get_learning_loop_payload(clerk_id)
+
+        user_prompt = build_study_plan_prompt(
+            onboarding_data,
+            learning_history=learning_history,
+        )
+
+        model = get_target_model()
+
         check_gemini_rate_limit(clerk_id)
 
-        # Add the background task to generate and save the study plan
-        background_tasks.add_task(generate_and_save_plan, user_prompt=user_prompt, clerk_id=clerk_id)
+        # Add the background task to generate and save the study plan.
+        background_tasks.add_task(
+            generate_and_save_plan,
+            user_prompt=user_prompt,
+            clerk_id=clerk_id,
+        )
 
         return {
             "success": True,
@@ -358,9 +376,9 @@ async def generate_study_plan(
             "model": model,
         }
 
-
     except HTTPException:
         raise
+
     except Exception as exc:
         logger.exception("Study plan generation failed")
 
@@ -368,7 +386,6 @@ async def generate_study_plan(
             status_code=500,
             detail="Study plan generation failed",
         ) from exc
-
 
 # -----------------------------
 # Regenerate / Tweak Study Plan Endpoint
