@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -18,16 +19,19 @@ if SUPABASE_URL.startswith("http://") or SUPABASE_URL.startswith("https://"):
 else:
     print("Warning: SUPABASE_URL is not configured with a valid HTTP/HTTPS URL. Running without active DB connection.")
 
+
 def get_db() -> Client:
     if not supabase:
         raise RuntimeError("Database connection not initialized. Please configure SUPABASE_URL in .env")
     return supabase
 
-def upsert_study_plan(clerk_id: str, plan_data: dict):
-    db = get_db()
 
-    # Find internal user UUID using Clerk ID
-    user_response = (
+def get_or_create_user(db: Client, clerk_id: str, email: str | None = None) -> str:
+    """Return the internal UUID associated with a verified Clerk user, provisioning if not found."""
+    if not clerk_id:
+        raise ValueError("Clerk user ID is required")
+
+    existing = (
         db.table("users")
         .select("id")
         .eq("clerk_id", clerk_id)
@@ -35,10 +39,34 @@ def upsert_study_plan(clerk_id: str, plan_data: dict):
         .execute()
     )
 
-    if not user_response.data:
-        raise ValueError("User not found")
+    if existing.data:
+        return str(existing.data[0]["id"])
 
-    user_id = user_response.data[0]["id"]
+    user_email = email or f"{clerk_id}@clerk.user"
+
+    created = (
+        db.table("users")
+        .insert({
+            "clerk_id": clerk_id,
+            "email": str(user_email),
+            "role": "student",
+        })
+        .execute()
+    )
+
+    if not created.data:
+        raise RuntimeError("Failed to provision new user")
+
+    return str(created.data[0]["id"])
+
+
+def upsert_study_plan(clerk_id: str, plan_data: dict, email: str | None = None):
+    db = get_db()
+
+    # Find or provision internal user UUID using Clerk ID
+    user_id = get_or_create_user(db, clerk_id=clerk_id, email=email)
+
+    now = datetime.now(timezone.utc).isoformat()
 
     # Insert or update the user's study plan
     response = (
@@ -47,12 +75,15 @@ def upsert_study_plan(clerk_id: str, plan_data: dict):
             {
                 "user_id": user_id,
                 "plan_data": plan_data,
+                "is_active": True,
+                "updated_at": now,
             },
-            on_conflict="user_id"
+            on_conflict="user_id",
         )
         .execute()
     )
 
     return response.data
+
 
 save_study_plan = upsert_study_plan
