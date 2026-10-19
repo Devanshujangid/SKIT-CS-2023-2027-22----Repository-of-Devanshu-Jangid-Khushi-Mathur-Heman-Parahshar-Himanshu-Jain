@@ -447,3 +447,19 @@ async def regenerate_study_plan(
             detail="Study plan regeneration failed",
         ) from exc
 
+
+# -----------------------------
+# Adaptive Schedule Adjustment Endpoint
+# -----------------------------
+
+@router.post("/adapt-plan")
+async def adapt_study_plan(
+    user_data: dict = Depends(verify_clerk_token)
+):
+    """
+    Adaptive Schedule Adjustment endpoint:
+    Flags missed tasks from previous days and dynamically rebalances them into upcoming schedule.
+    """
+    from routes.plans import rebalance_plan
+    return await rebalance_plan(user_data=user_data)
+
