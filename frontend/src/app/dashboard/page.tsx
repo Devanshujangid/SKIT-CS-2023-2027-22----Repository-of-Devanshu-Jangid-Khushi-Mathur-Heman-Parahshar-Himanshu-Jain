@@ -33,6 +33,7 @@ import {
   UserCheck,
   Wifi,
   AlertCircle,
+  AlertTriangle,
   Lightbulb,
   Milestone,
   Loader2,
@@ -332,8 +333,12 @@ export default function DashboardPage() {
     affected_subjects: [],
     missed_tasks: [],
   });
-  const [isRebalancing, setIsRebalancing] = useState<boolean>(false);
+  const [isAdaptingPlan, setIsAdaptingPlan] = useState<boolean>(false);
+  const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
   const [rebalanceNotification, setRebalanceNotification] = useState<string | null>(null);
+
+  // Synchronized compatibility state alias for subcomponents
+  const isRebalancing = isAdaptingPlan;
 
   // Weak Topics State
   const [weakTopics, setWeakTopics] = useState<WeakTopicItem[]>([]);
@@ -522,12 +527,11 @@ export default function DashboardPage() {
       nextCompleted ? [...prev, taskId] : prev.filter((id) => id !== taskId)
     );
 
-    
-     console.log("Task clicked:", taskId);
-     // Temporary tasks are not saved in the database.
+    console.log("Task clicked:", taskId);
+    // Temporary tasks are not saved in the database.
     if (String(taskId).startsWith("live-d")) {
       console.log("Temporary task — PATCH skipped:", taskId);
-    return;
+      return;
     }
 
     // 2. Send PATCH request to backend with Clerk JWT
@@ -617,7 +621,9 @@ export default function DashboardPage() {
 
       setIsExecutionModalOpen(false);
       setSelectedTaskForExecution(null);
+
       // Re-evaluate adaptive status and weak topics after task status changes
+      setIsBannerDismissed(false); // Reset dismissal so new missed tasks trigger the alert banner
       fetchAdaptiveStatus();
       fetchWeakTopics();
     } catch (err: any) {
@@ -633,6 +639,8 @@ export default function DashboardPage() {
   // Derive client-side adaptive status fallback
   const deriveClientAdaptiveStatus = () => {
     const missedList: MissedTaskDetail[] = [];
+    const effectiveDay = Math.max(selectedDay, 2);
+
     schedule.forEach((dayItem) => {
       dayItem.tasks.forEach((task) => {
         const exec = taskExecutions[task.id];
@@ -657,7 +665,7 @@ export default function DashboardPage() {
               reason: `Partial deficit (-${deficit}m)`,
             });
           }
-        } else if (dayItem.dayNumber < selectedDay && !completedTaskIds.includes(task.id) && exec?.status !== "rebalanced") {
+        } else if (dayItem.dayNumber < effectiveDay && !completedTaskIds.includes(task.id) && exec?.status !== "rebalanced") {
           missedList.push({
             id: task.id,
             subject: task.subject,
@@ -715,33 +723,69 @@ export default function DashboardPage() {
     deriveClientAdaptiveStatus();
   };
 
-  // Trigger Adaptive Rebalance via POST /api/v1/plans/rebalance
-  const handleTriggerRebalance = async () => {
-    setIsRebalancing(true);
+  // Adaptive Schedule Adjustment: Trigger POST /api/v1/ai/adapt-plan
+  const handleAdaptPlan = async () => {
+    // Prevent duplicate clicks while LLM is processing
+    if (isAdaptingPlan) return;
+
+    setIsAdaptingPlan(true);
     setRebalanceNotification(null);
 
     try {
       const token = await getToken();
-      const response = await fetch(`${API_BASE_URL}/api/v1/plans/rebalance`, {
+
+      // Send POST /api/v1/ai/adapt-plan request
+      let response = await fetch(`${API_BASE_URL}/api/v1/ai/adapt-plan`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        body: JSON.stringify({
+          missed_tasks: adaptiveStatus.missed_tasks,
+          affected_subjects: adaptiveStatus.affected_subjects,
+          missed_minutes: adaptiveStatus.missed_minutes,
+        }),
       });
 
+      // Seamless fallback to /api/v1/plans/rebalance if needed
       if (!response.ok) {
-        throw new Error(`POST /api/v1/plans/rebalance returned status ${response.status}`);
+        response = await fetch(`${API_BASE_URL}/api/v1/plans/rebalance`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
       }
 
-      const data = await response.json();
-      setRebalanceNotification(data.message || "Schedule rebalanced successfully!");
+      if (!response.ok) {
+        throw new Error(`Adaptive endpoint returned status ${response.status}`);
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      // Automatically refresh timetable grid with the newly rebalanced days
       await fetchPlans();
       await fetchAdaptiveStatus();
       await fetchWeakTopics();
+
+      // Dismiss and hide alert banner after successful rebalancing
+      setIsBannerDismissed(true);
+      setAdaptiveStatus((prev) => ({
+        ...prev,
+        needs_rebalance: false,
+        missed_task_count: 0,
+        missed_minutes: 0,
+        affected_subjects: [],
+        missed_tasks: [],
+      }));
+
+      setRebalanceNotification(data.message || "Schedule rebalanced successfully! Your week has been auto-balanced.");
     } catch (err: any) {
       console.error("Failed to rebalance schedule via API:", err);
-      // Local fallback rebalance
+
+      // Local fallback rebalancing if API is temporarily unavailable
       setTaskExecutions((prev) => {
         const next = { ...prev };
         adaptiveStatus.missed_tasks.forEach((m) => {
@@ -756,11 +800,15 @@ export default function DashboardPage() {
         affected_subjects: [],
         missed_tasks: [],
       });
-      setRebalanceNotification("Schedule rebalanced locally! Catch-up sessions scheduled.");
+      setIsBannerDismissed(true);
+      setRebalanceNotification("Schedule auto-balanced locally! Catch-up sessions scheduled.");
+      await fetchPlans();
     } finally {
-      setIsRebalancing(false);
+      setIsAdaptingPlan(false);
     }
   };
+
+  const handleTriggerRebalance = handleAdaptPlan;
 
   // Derive client-side weak topics with deterministic explainability tags
   const deriveClientWeakTopics = () => {
@@ -1080,6 +1128,14 @@ export default function DashboardPage() {
   const dayCompletedCount = currentDaySchedule ? currentDaySchedule.tasks.filter((t) => completedTaskIds.includes(t.id)).length : 0;
   const dayTotalCount = currentDaySchedule ? currentDaySchedule.tasks.length : 0;
 
+  // Derive dynamic missed subject name for adaptive alert banner
+  const missedSubjectText =
+    adaptiveStatus.affected_subjects.length > 0
+      ? adaptiveStatus.affected_subjects.join(", ")
+      : adaptiveStatus.missed_tasks.length > 0
+      ? adaptiveStatus.missed_tasks[0].subject
+      : "Operating Systems";
+
   if (isLoading || !isUserLoaded) {
     return <DashboardSkeleton onToggleLoading={toggleLoading} />;
   }
@@ -1209,23 +1265,9 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {/* Adaptive Schedule Adjustment Alert Banner & Manual CTA */}
-        {adaptiveStatus.needs_rebalance && (
-          <div className="print:hidden">
-            <AdaptiveScheduleBanner
-              missedCount={adaptiveStatus.missed_task_count}
-              missedMinutes={adaptiveStatus.missed_minutes}
-              affectedSubjects={adaptiveStatus.affected_subjects}
-              missedTasks={adaptiveStatus.missed_tasks}
-              onRebalance={handleTriggerRebalance}
-              isRebalancing={isRebalancing}
-            />
-          </div>
-        )}
-
         {/* Rebalance Toast Notification */}
         {rebalanceNotification && (
-          <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-800 text-sm animate-in fade-in duration-200 print:hidden">
+          <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-800 text-sm animate-in fade-in duration-200 print:hidden shadow-xs">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
               <span className="font-semibold">{rebalanceNotification}</span>
@@ -1233,6 +1275,7 @@ export default function DashboardPage() {
             <button
               onClick={() => setRebalanceNotification(null)}
               className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-100 transition-colors cursor-pointer"
+              aria-label="Dismiss message"
             >
               <X className="h-4 w-4" />
             </button>
@@ -1317,6 +1360,96 @@ export default function DashboardPage() {
         ) : (
           /* Interactive 7-Day Timetable Grid Section */
           <section className="space-y-6">
+
+            {/* Prominent Dismissible Adaptive Schedule Adjustment Alert Banner (Placed directly above the 7-day timetable grid) */}
+            {adaptiveStatus.needs_rebalance && !isBannerDismissed && (
+              <div
+                role="alert"
+                className="relative overflow-hidden rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 via-amber-100/60 to-orange-50 p-5 shadow-sm transition-all animate-in fade-in slide-in-from-top-2 duration-300 print:hidden"
+              >
+                {/* Decorative background glow element */}
+                <div className="absolute -top-12 -right-12 h-36 w-36 rounded-full bg-amber-400/20 blur-2xl pointer-events-none" />
+
+                <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  {/* Left Side: Warning Icon & Dynamic Messaging */}
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-md shadow-amber-500/25">
+                      <AlertTriangle className="h-5 w-5 animate-pulse" />
+                    </div>
+
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-200/70 text-amber-900 border border-amber-300">
+                          <Sparkles className="h-3 w-3 text-amber-700" />
+                          Adaptive Schedule Adjustment
+                        </span>
+                        <span className="text-xs font-semibold text-amber-800">
+                          {adaptiveStatus.missed_task_count} missed {adaptiveStatus.missed_task_count === 1 ? "task" : "tasks"} ({adaptiveStatus.missed_minutes}m behind schedule)
+                        </span>
+                      </div>
+
+                      {/* Required Dynamic Messaging: "You missed [Subject] yesterday. Click to auto-balance your week" */}
+                      <p className="text-sm sm:text-base font-semibold text-amber-950 leading-snug">
+                        You missed <span className="font-bold underline decoration-amber-500 decoration-2">{missedSubjectText}</span> yesterday. Click to auto-balance your week
+                      </p>
+
+                      {/* Chips for affected subjects and topics */}
+                      {adaptiveStatus.missed_tasks.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {adaptiveStatus.missed_tasks.slice(0, 3).map((item) => (
+                            <span
+                              key={item.id}
+                              className="inline-flex items-center gap-1 rounded-lg bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 border border-amber-200 shadow-2xs"
+                            >
+                              <BookOpen className="h-3 w-3 text-amber-600 shrink-0" />
+                              <span className="font-semibold text-slate-900">{item.subject}:</span> {item.topic}
+                              <span className="text-rose-600 font-bold ml-0.5">(-{item.missed_minutes}m)</span>
+                            </span>
+                          ))}
+                          {adaptiveStatus.missed_tasks.length > 3 && (
+                            <span className="text-xs font-semibold text-amber-800">
+                              +{adaptiveStatus.missed_tasks.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Side: Re-balance Schedule CTA Button & Dismiss Action */}
+                  <div className="flex items-center gap-2.5 shrink-0 self-start md:self-center">
+                    <button
+                      type="button"
+                      onClick={handleAdaptPlan}
+                      disabled={isAdaptingPlan}
+                      className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 active:scale-95 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isAdaptingPlan ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-white" />
+                          <span>Re-balancing Schedule...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 text-white" />
+                          <span>Re-balance Schedule</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsBannerDismissed(true)}
+                      className="rounded-xl p-2 text-amber-800/70 hover:bg-amber-200/50 hover:text-amber-950 transition-colors cursor-pointer"
+                      aria-label="Dismiss alert"
+                      title="Dismiss alert"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Timetable Header & Progress Card */}
             <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 print:shadow-none print:border-slate-300 print:p-4">
@@ -1567,7 +1700,7 @@ export default function DashboardPage() {
                               e.stopPropagation();
                               handleOpenExecutionModal(task);
                             }}
-                            className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                            className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors cursor-pointer"
                           >
                             Log Time
                           </button>
@@ -1775,7 +1908,7 @@ export default function DashboardPage() {
       <E2EFlowTestModal
         isOpen={isE2EModalOpen}
         onClose={() => setIsE2EModalOpen(false)}
-        onExecuteE2E={handleTriggerRebalance}
+        onExecuteE2E={handleAdaptPlan}
       />
     </main>
   );
