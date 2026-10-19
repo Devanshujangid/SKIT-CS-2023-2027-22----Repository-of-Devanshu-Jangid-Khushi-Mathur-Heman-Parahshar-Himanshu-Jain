@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 CLERK_ISSUER_URL = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
+logger.info("Clerk issuer configured: %s", bool(CLERK_ISSUER_URL))
 JWKS_TTL_SECONDS = 3600
 JWKS_TIMEOUT_SECONDS = 5.0
 
@@ -144,6 +145,7 @@ async def verify_clerk_token(
         logger.warning(
             "Clerk token verification failed: %s",
             type(exc).__name__,
+            str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

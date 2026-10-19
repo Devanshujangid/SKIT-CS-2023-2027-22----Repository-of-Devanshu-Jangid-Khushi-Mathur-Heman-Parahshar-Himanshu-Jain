@@ -204,24 +204,48 @@ function formatActivityType(typeStr: string): string {
     .join(" ");
 }
 
-function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[] {
+
+function parseWeeklySchedule(
+  weeklySchedule: BackendDaySchedule[],
+  databaseTasks: any[] = []
+): ScheduleDay[] {
   return weeklySchedule.map((dayItem, dayIdx) => {
     const dayName = dayItem.day || `Day ${dayIdx + 1}`;
-    const dayNumber = DAY_NAME_TO_NUMBER[dayName] || (dayIdx + 1);
+    const dayNumber = DAY_NAME_TO_NUMBER[dayName] || dayIdx + 1;
 
-    const tasks: ScheduleTask[] = (dayItem.sessions || []).map((sess, sessIdx) => {
-      const durationMins = Math.round((sess.duration_hours || 1) * 60);
-      const isDone = Boolean(sess.completed || sess.is_completed || sess.status === "completed");
-      return {
-        id: sess.id || `live-d${dayNumber}-t${sessIdx + 1}`,
-        subject: sess.subject || "General Study",
-        topic: sess.topic || "Core Topic",
-        activity: formatActivityType(sess.activity_type),
-        duration_minutes: durationMins,
-        priority: sess.priority || "medium",
-        completed: isDone,
-      };
-    });
+    const tasks: ScheduleTask[] = (dayItem.sessions || []).map(
+      (sess, sessIdx) => {
+        const subject = sess.subject || "General Study";
+        const topic = sess.topic || "Core Topic";
+        const durationMins = Math.round((sess.duration_hours || 1) * 60);
+
+        // Find the corresponding persisted database task by title.
+        const expectedTitle = `${subject}: ${topic}`.trim().toLowerCase();
+
+        const dbTask = databaseTasks.find(
+          (task) =>
+            String(task.title || "").trim().toLowerCase() === expectedTitle
+        );
+
+        const isDone = dbTask
+          ? Boolean(dbTask.is_completed)
+          : Boolean(
+              sess.completed ||
+              sess.is_completed ||
+              sess.status === "completed"
+            );
+
+        return {
+          id: dbTask?.id || sess.id || `live-d${dayNumber}-t${sessIdx + 1}`,
+          subject,
+          topic,
+          activity: formatActivityType(sess.activity_type),
+          duration_minutes: durationMins,
+          priority: sess.priority || "medium",
+          completed: isDone,
+        };
+      }
+    );
 
     return {
       dayNumber,
@@ -231,6 +255,7 @@ function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[
     };
   });
 }
+
 
 function normalizeRecommendation(item: any, index: number): RecommendedCourse {
   const title = item.title || item.course_name || item["Course Name"] || item.name || "Recommended Course";
@@ -308,6 +333,8 @@ export default function DashboardPage() {
 
     try {
       const token = await getToken();
+      console.log("Signed in:", isSignedIn);
+      console.log("Token available:", Boolean(token));
       if (!token) {
     throw new Error("Please sign in again to load recommendations.");
   }
@@ -407,6 +434,7 @@ export default function DashboardPage() {
           } else {
             planData = latestPlan.plan_data;
           }
+          
 
           if (planData) {
             if (planData.plan_overview) {
@@ -419,24 +447,40 @@ export default function DashboardPage() {
               setStudyTips(planData.study_tips);
             }
             if (planData.weekly_schedule && planData.weekly_schedule.length > 0) {
-              const mappedSchedule = parseWeeklySchedule(planData.weekly_schedule);
-              setSchedule(mappedSchedule);
-              setHasPlan(true);
+                  const planAny = planData as any;
 
-              // Initialize completed tasks from database if available
-              const planAny = planData as any;
-              if (Array.isArray(planAny.completed_task_ids)) {
-                setCompletedTaskIds(planAny.completed_task_ids);
-              } else {
-                const doneIds = mappedSchedule
-                  .flatMap((d) => d.tasks)
+            // Fetch persisted tasks with their real database IDs
+                  const token = await getToken();
+                  const tasksResponse = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+                  headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+                   let databaseTasks: any[] = [];
+
+                   if (tasksResponse.ok) {
+                       const tasksData = await tasksResponse.json();
+                       databaseTasks = tasksData.tasks || [];
+                } else {
+                        console.error("Failed to fetch database tasks:", tasksResponse.status);
+                }
+
+                  const mappedSchedule = parseWeeklySchedule(
+                  planData.weekly_schedule,
+                  databaseTasks
+                    );
+
+                  setSchedule(mappedSchedule);
+                  setHasPlan(true);
+
+                  const doneIds = mappedSchedule
+                 .flatMap((d) => d.tasks)
                   .filter((t) => t.completed)
                   .map((t) => t.id);
-                if (doneIds.length > 0) {
-                  setCompletedTaskIds((prev) => Array.from(new Set([...prev, ...doneIds])));
-                }
-              }
-            }
+
+                   setCompletedTaskIds(doneIds);
+               }
           }
         } else {
           // User has no study plans in database
@@ -483,9 +527,7 @@ export default function DashboardPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          status: nextCompleted ? "completed" : "pending",
           is_completed: nextCompleted,
-          completed: nextCompleted,
         }),
       });
 
