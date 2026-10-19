@@ -258,6 +258,7 @@ function parseWeeklySchedule(
   });
 }
 
+
 function normalizeRecommendation(item: any, index: number): RecommendedCourse {
   const title = item.title || item.course_name || item["Course Name"] || item.name || "Recommended Course";
   const provider = item.provider || item.university || item["University"] || "Online Course";
@@ -369,19 +370,25 @@ export default function DashboardPage() {
 
     try {
       const token = await getToken();
-      const savedProfile = typeof window !== "undefined" ? localStorage.getItem("slp_user_profile") : null;
-      const profile = savedProfile ? JSON.parse(savedProfile) : null;
-      const profileSubjects = Array.isArray(profile?.subjects)
-        ? profile.subjects
-        : (userProfile?.subjects || []);
+      console.log("Signed in:", isSignedIn);
+      console.log("Token available:", Boolean(token));
+      if (!token) {
+    throw new Error("Please sign in again to load recommendations.");
+  }
 
-      const defaultQuery = profileSubjects.join(" ").trim() || planOverview?.primary_focus || "Computer Science";
-      const targetQuery = (customQuery || defaultQuery).trim();
+  const savedProfile = localStorage.getItem("slp_user_profile");
+  const profile = savedProfile ? JSON.parse(savedProfile) : null;
 
-      if (!targetQuery) {
-        setRecommendations([]);
-        return;
-      }
+  const subjects = Array.isArray(profile?.subjects)
+    ? profile.subjects
+    : [];
+
+  const query = subjects.join(" ").trim();
+
+  if (!query) {
+    setRecommendations([]);
+    return;
+  }
 
       const response = await fetch(
         `${API_BASE_URL}/api/v1/recommendations?query=${encodeURIComponent(targetQuery)}&top_n=6`,
@@ -464,6 +471,7 @@ export default function DashboardPage() {
           } else {
             planData = latestPlan.plan_data;
           }
+          
 
           if (planData) {
             if (planData.plan_overview) {
@@ -476,30 +484,40 @@ export default function DashboardPage() {
               setStudyTips(planData.study_tips);
             }
             if (planData.weekly_schedule && planData.weekly_schedule.length > 0) {
-              const planAny = planData as any;
-              const loadedExecutions: Record<string, TaskExecutionData> =
-                planAny.task_executions && typeof planAny.task_executions === "object"
-                  ? planAny.task_executions
-                  : {};
-              setTaskExecutions(loadedExecutions);
+                  const planAny = planData as any;
 
-              const mappedSchedule = parseWeeklySchedule(planData.weekly_schedule, loadedExecutions);
-              setSchedule(mappedSchedule);
-              setHasPlan(true);
+            // Fetch persisted tasks with their real database IDs
+                  const token = await getToken();
+                  const tasksResponse = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+                  headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
 
-              // Initialize completed tasks from database if available
-              if (Array.isArray(planAny.completed_task_ids)) {
-                setCompletedTaskIds(planAny.completed_task_ids);
-              } else {
-                const doneIds = mappedSchedule
-                  .flatMap((d) => d.tasks)
+                   let databaseTasks: any[] = [];
+
+                   if (tasksResponse.ok) {
+                       const tasksData = await tasksResponse.json();
+                       databaseTasks = tasksData.tasks || [];
+                } else {
+                        console.error("Failed to fetch database tasks:", tasksResponse.status);
+                }
+
+                  const mappedSchedule = parseWeeklySchedule(
+                  planData.weekly_schedule,
+                  databaseTasks
+                    );
+
+                  setSchedule(mappedSchedule);
+                  setHasPlan(true);
+
+                  const doneIds = mappedSchedule
+                 .flatMap((d) => d.tasks)
                   .filter((t) => t.completed)
                   .map((t) => t.id);
-                if (doneIds.length > 0) {
-                  setCompletedTaskIds((prev) => Array.from(new Set([...prev, ...doneIds])));
-                }
-              }
-            }
+
+                   setCompletedTaskIds(doneIds);
+               }
           }
         } else {
           // User has no study plans in database
@@ -545,9 +563,7 @@ export default function DashboardPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          status: nextCompleted ? "completed" : "pending",
           is_completed: nextCompleted,
-          completed: nextCompleted,
         }),
       });
 

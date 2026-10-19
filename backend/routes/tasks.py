@@ -47,7 +47,7 @@ async def get_tasks(
             .select("id")
             .eq("clerk_id", clerk_id)
             .limit(1)
-            .execute()
+            .execute() 
         )
 
         if not user_res.data:
@@ -57,7 +57,8 @@ async def get_tasks(
         tasks_res = (
             db.table("tasks")
             .select(
-                "id, user_id, title, description, is_completed, completed_at, created_at, updated_at"
+                "id, user_id, title, description, is_completed, "
+                "completed_at, created_at, updated_at, scheduled_date, plan_session_key"
             )
             .eq("user_id", user_id)
             .order("created_at", desc=True)
@@ -164,6 +165,7 @@ async def update_task_status(
             db.table("users")
             .select("id")
             .eq("clerk_id", clerk_id)
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
