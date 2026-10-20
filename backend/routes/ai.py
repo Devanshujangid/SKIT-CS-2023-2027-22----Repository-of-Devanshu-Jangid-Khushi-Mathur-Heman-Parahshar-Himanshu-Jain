@@ -250,15 +250,20 @@ def generate_and_save_plan(
             plan_data=validated_plan.model_dump()
         )
         print(">>> PLAN SAVED TO DATABASE", flush=True)
+
+        try:
+            save_plan_tasks(
+                clerk_id=clerk_id,
+                plan_data=plan_data
+            )
+            print(">>> PLAN TASKS SAVED TO DATABASE", flush=True)
+        except Exception as task_exc:
+            logger.warning("Could not sync individual plan tasks: %s", task_exc)
+
         generation_status[clerk_id] = {
             "status": "completed",
             "message": "Study plan generated successfully."
         }
-        save_plan_tasks(
-          clerk_id=clerk_id,
-          plan_data=plan_data
-         )
-        print(">>> PLAN TASKS SAVED TO DATABASE", flush=True)
 
         logger.info(
             "Background study plan generation completed successfully"

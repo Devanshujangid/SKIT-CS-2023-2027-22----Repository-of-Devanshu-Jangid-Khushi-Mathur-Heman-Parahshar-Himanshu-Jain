@@ -3,12 +3,17 @@ import logging
 import os
 import time
 
+from pathlib import Path
+
 import httpx
 import jwt
 from dotenv import load_dotenv
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.is_file():
+    load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 
 logger = logging.getLogger(__name__)
