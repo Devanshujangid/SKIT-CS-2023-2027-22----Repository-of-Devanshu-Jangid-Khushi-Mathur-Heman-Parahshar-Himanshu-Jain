@@ -18,7 +18,10 @@ router = APIRouter(
 
 
 class TaskStatusRequest(BaseModel):
-    is_completed: bool
+    is_completed: Optional[bool] = None
+    status: Optional[str] = None
+    actual_minutes: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class TaskCreateRequest(BaseModel):
@@ -176,6 +179,17 @@ async def update_task_status(
         user_id = user_res.data[0]["id"]
         now = datetime.now(timezone.utc).isoformat()
 
+        # Determine effective completion boolean and execution status
+        status_val = payload.status
+        if status_val:
+            is_completed = (status_val == "completed")
+        elif payload.is_completed is not None:
+            is_completed = payload.is_completed
+            status_val = "completed" if is_completed else "pending"
+        else:
+            is_completed = False
+            status_val = "pending"
+
         # 1. If ID is a valid UUID, attempt updating the standalone tasks table
         is_uuid = False
         try:
@@ -186,8 +200,8 @@ async def update_task_status(
 
         if is_uuid:
             update_data = {
-                "is_completed": payload.is_completed,
-                "completed_at": now if payload.is_completed else None,
+                "is_completed": is_completed,
+                "completed_at": now if is_completed else None,
                 "updated_at": now,
             }
 
@@ -206,7 +220,12 @@ async def update_task_status(
                 return {
                     "success": True,
                     "message": "Task status updated",
-                    "task": result.data[0],
+                    "task": {
+                        **result.data[0],
+                        "status": status_val,
+                        "actual_minutes": payload.actual_minutes,
+                        "notes": payload.notes,
+                    },
                 }
 
         # 2. Fallback: Update completion in user's active study plan
@@ -224,13 +243,22 @@ async def update_task_status(
             plan_row = plan_res.data[0]
             plan_data = plan_row.get("plan_data") or {}
             completed_set = set(plan_data.get("completed_task_ids") or [])
+            task_executions = plan_data.get("task_executions") or {}
 
-            if payload.is_completed:
+            if is_completed:
                 completed_set.add(id)
             else:
                 completed_set.discard(id)
 
+            task_executions[id] = {
+                "status": status_val,
+                "actual_minutes": payload.actual_minutes,
+                "notes": payload.notes,
+                "updated_at": now,
+            }
+
             plan_data["completed_task_ids"] = list(completed_set)
+            plan_data["task_executions"] = task_executions
 
             db.table("study_plans").update({
                 "plan_data": plan_data,
@@ -239,10 +267,13 @@ async def update_task_status(
 
             return {
                 "success": True,
-                "message": "Study plan task status updated",
+                "message": "Study plan task execution updated",
                 "task": {
                     "id": id,
-                    "is_completed": payload.is_completed,
+                    "is_completed": is_completed,
+                    "status": status_val,
+                    "actual_minutes": payload.actual_minutes,
+                    "notes": payload.notes,
                 },
             }
 
