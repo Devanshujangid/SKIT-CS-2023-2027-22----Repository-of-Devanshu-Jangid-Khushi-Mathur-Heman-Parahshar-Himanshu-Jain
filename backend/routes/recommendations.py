@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import logging
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,8 @@ async def get_recommendations(
             detail="Authenticated user ID is missing"
         )
     try:
-        results = recommendation_service.recommend_courses(
+        results = await run_in_threadpool(
+            recommendation_service.recommend_courses,
             query=query.strip(),
             top_n=top_n
         )
