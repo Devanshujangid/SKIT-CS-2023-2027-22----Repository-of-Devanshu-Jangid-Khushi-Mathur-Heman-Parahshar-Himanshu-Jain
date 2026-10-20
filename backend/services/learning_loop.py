@@ -44,20 +44,27 @@ def get_learning_loop_payload(clerk_id: str) -> dict:
 
     user_id = user_result.data[0]["id"]
 
-    # Fetch tasks scheduled during the last 7 calendar days.
-    result = (
-        db.table("tasks")
-        .select(
-            "id, title, description, is_completed, "
-            "completed_at, scheduled_date"
+    tasks = []
+    try:
+        # Fetch tasks scheduled during the last 7 calendar days.
+        result = (
+            db.table("tasks")
+            .select(
+                "id, title, description, is_completed, "
+                "completed_at, scheduled_date"
+            )
+            .eq("user_id", user_id)
+            .gte("scheduled_date", start_date.isoformat())
+            .lte("scheduled_date", today.isoformat())
+            .execute()
         )
-        .eq("user_id", user_id)
-        .gte("scheduled_date", start_date.isoformat())
-        .lte("scheduled_date", today.isoformat())
-        .execute()
-    )
-
-    tasks = result.data or []
+        tasks = result.data or []
+    except Exception as exc:
+        logger.warning(
+            "Could not query tasks by scheduled_date: %s. Using empty task history.",
+            exc,
+        )
+        tasks = []
 
     completed_tasks = []
     missed_sessions = []

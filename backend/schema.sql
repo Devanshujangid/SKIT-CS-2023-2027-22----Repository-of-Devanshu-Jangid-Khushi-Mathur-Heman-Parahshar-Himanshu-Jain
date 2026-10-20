@@ -69,14 +69,25 @@ CREATE TABLE IF NOT EXISTS public.tasks (
         REFERENCES public.users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     description TEXT,
+    scheduled_date DATE,
+    plan_session_key TEXT,
     is_completed BOOLEAN NOT NULL DEFAULT FALSE,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Migration for existing databases
+ALTER TABLE public.tasks
+ADD COLUMN IF NOT EXISTS scheduled_date DATE,
+ADD COLUMN IF NOT EXISTS plan_session_key TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_tasks_user_created
 ON public.tasks(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_scheduled
+ON public.tasks(user_id, scheduled_date);
+
 
 
 -- ============================================================

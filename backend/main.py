@@ -1,11 +1,18 @@
 
 import logging
 import os
+from pathlib import Path
 from typing import List, Optional, Union
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
+
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.is_file():
+    load_dotenv(dotenv_path=_env_path)
+load_dotenv()
 
 from auth import verify_clerk_token
 from database import get_db
