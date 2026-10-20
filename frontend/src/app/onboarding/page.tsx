@@ -21,6 +21,15 @@ export default function OnboardingPage() {
     subjects: "",
   });
 
+const handleGetToken = async () => {
+  const token = await getToken({
+    template: "swagger-testing",
+  });
+
+  console.log("Token available:", !!token);
+  console.log("Token:", token);
+};
+
   // Pre-populate form if user profile exists in localStorage
   useEffect(() => {
     try {
@@ -67,6 +76,9 @@ export default function OnboardingPage() {
 
     try {
       const token = await getToken();
+      if (!token) {
+        throw new Error("Clerk token unavailable. Please sign in again and retry.");
+      }
 
       // 1. Save profile to backend /api/v1/profile
       const profileRes = await fetch(`${API_BASE_URL}/api/v1/profile`, {
@@ -302,6 +314,8 @@ export default function OnboardingPage() {
           </form>
         </div>
 
+        
+
         {/* High Visibility Generating Plan Loading Modal Overlay */}
         {(isSubmitting || isGeneratingPlan) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
@@ -323,9 +337,11 @@ export default function OnboardingPage() {
             </div>
           </div>
         )}
+        <button onClick={handleGetToken}>
+  Get Swagger Token
+</button>
 
       </div>
     </main>
   );
 }
-

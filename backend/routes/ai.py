@@ -208,9 +208,10 @@ def extract_json(text: str) -> Dict[str, Any]:
 
 
 def generate_and_save_plan(
-    user_prompt: str,
+    user_prompt: Optional[str],
     clerk_id: str,
-    system_instruction: str = STUDY_PLAN_SYSTEM_INSTRUCTION
+    system_instruction: str = STUDY_PLAN_SYSTEM_INSTRUCTION,
+    onboarding_data: Optional[OnboardingDataInput] = None,
 ):
     try:
         print(">>> BACKGROUND TASK STARTED", flush=True)
@@ -220,6 +221,17 @@ def generate_and_save_plan(
             "status": "generating",
             "message": "Your study plan is being generated."
         }
+        # Build the adaptive prompt inside the background task.
+        if onboarding_data is not None:
+            learning_history = get_learning_loop_payload(clerk_id)
+
+            user_prompt = build_study_plan_prompt(
+                onboarding_data,
+                learning_history=learning_history,
+            )
+        if not user_prompt:
+            raise ValueError("Study plan prompt is missing")
+
 
         response_text = generate_gemini_response(
             prompt=user_prompt,
@@ -367,12 +379,18 @@ async def generate_study_plan(
         model = get_target_model()
 
         check_gemini_rate_limit(clerk_id)
+        generation_status[clerk_id] = {
+            "status": "generating",
+            "message": "Your study plan is being generated.",
+        }
+
 
         # Add the background task to generate and save the study plan.
         background_tasks.add_task(
             generate_and_save_plan,
             user_prompt=user_prompt,
             clerk_id=clerk_id,
+            onboarding_data=onboarding_data,
         )
 
         return {
@@ -417,6 +435,11 @@ async def regenerate_study_plan(
             )
 
         check_gemini_rate_limit(clerk_id)
+
+        generation_status[clerk_id] = {
+    "status": "generating",
+    "message": "Your study plan is being regenerated.",
+}
             
         # Construct RegenerationInput context combining current plan history and user tweak feedback
         regeneration_input = RegenerationInput(
@@ -451,4 +474,20 @@ async def regenerate_study_plan(
             status_code=500,
             detail="Study plan regeneration failed",
         ) from exc
+
+
+# -----------------------------
+# Adaptive Schedule Adjustment Endpoint
+# -----------------------------
+
+@router.post("/adapt-plan")
+async def adapt_study_plan(
+    user_data: dict = Depends(verify_clerk_token)
+):
+    """
+    Adaptive Schedule Adjustment endpoint:
+    Flags missed tasks from previous days and dynamically rebalances them into upcoming schedule.
+    """
+    from routes.plans import rebalance_plan
+    return await rebalance_plan(user_data=user_data)
 

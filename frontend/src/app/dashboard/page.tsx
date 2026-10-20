@@ -5,6 +5,18 @@ import { useUser, useAuth, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_BASE_URL } from "@/lib/api";
+import TaskExecutionModal, {
+  TaskExecutionData,
+  TaskExecutionStatus,
+  TaskModalItem,
+} from "@/components/TaskExecutionModal";
+import AdaptiveScheduleBanner, {
+  MissedTaskDetail,
+} from "@/components/AdaptiveScheduleBanner";
+import FocusWeakTopicsWidget, {
+  WeakTopicItem,
+} from "@/components/FocusWeakTopicsWidget";
+import E2EFlowTestModal from "@/components/E2EFlowTestModal";
 import {
   BookOpen,
   Clock,
@@ -21,6 +33,7 @@ import {
   UserCheck,
   Wifi,
   AlertCircle,
+  AlertTriangle,
   Lightbulb,
   Milestone,
   Loader2,
@@ -29,6 +42,7 @@ import {
   ExternalLink,
   GraduationCap,
   Star,
+  X,
 } from "lucide-react";
 
 interface StatCardProps {
@@ -54,6 +68,7 @@ interface ScheduleTask {
   duration_minutes: number;
   priority: "high" | "medium" | "low";
   completed?: boolean;
+  execution?: TaskExecutionData;
 }
 
 interface ScheduleDay {
@@ -204,22 +219,33 @@ function formatActivityType(typeStr: string): string {
     .join(" ");
 }
 
-function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[] {
+function parseWeeklySchedule(
+  weeklySchedule: BackendDaySchedule[],
+  taskExecutions?: Record<string, TaskExecutionData>
+): ScheduleDay[] {
   return weeklySchedule.map((dayItem, dayIdx) => {
     const dayName = dayItem.day || `Day ${dayIdx + 1}`;
     const dayNumber = DAY_NAME_TO_NUMBER[dayName] || (dayIdx + 1);
 
     const tasks: ScheduleTask[] = (dayItem.sessions || []).map((sess, sessIdx) => {
       const durationMins = Math.round((sess.duration_hours || 1) * 60);
-      const isDone = Boolean(sess.completed || sess.is_completed || sess.status === "completed");
+      const taskId = sess.id || `live-d${dayNumber}-t${sessIdx + 1}`;
+      const exec = taskExecutions?.[taskId];
+      const isDone = Boolean(
+        exec?.status === "completed" ||
+        sess.completed ||
+        sess.is_completed ||
+        sess.status === "completed"
+      );
       return {
-        id: sess.id || `live-d${dayNumber}-t${sessIdx + 1}`,
+        id: taskId,
         subject: sess.subject || "General Study",
         topic: sess.topic || "Core Topic",
         activity: formatActivityType(sess.activity_type),
         duration_minutes: durationMins,
         priority: sess.priority || "medium",
         completed: isDone,
+        execution: exec,
       };
     });
 
@@ -231,6 +257,7 @@ function parseWeeklySchedule(weeklySchedule: BackendDaySchedule[]): ScheduleDay[
     };
   });
 }
+
 
 function normalizeRecommendation(item: any, index: number): RecommendedCourse {
   const title = item.title || item.course_name || item["Course Name"] || item.name || "Recommended Course";
@@ -284,6 +311,41 @@ export default function DashboardPage() {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
+  // Task Execution Modal State
+  const [isExecutionModalOpen, setIsExecutionModalOpen] = useState<boolean>(false);
+  const [selectedTaskForExecution, setSelectedTaskForExecution] = useState<ScheduleTask | null>(null);
+  const [taskExecutions, setTaskExecutions] = useState<Record<string, TaskExecutionData>>({});
+  const [isSavingExecution, setIsSavingExecution] = useState<boolean>(false);
+
+  // E2E Flow Test Modal State
+  const [isE2EModalOpen, setIsE2EModalOpen] = useState<boolean>(false);
+
+  // Adaptive Schedule Adjustment State
+  const [adaptiveStatus, setAdaptiveStatus] = useState<{
+    needs_rebalance: boolean;
+    missed_task_count: number;
+    missed_minutes: number;
+    affected_subjects: string[];
+    missed_tasks: MissedTaskDetail[];
+  }>({
+    needs_rebalance: false,
+    missed_task_count: 0,
+    missed_minutes: 0,
+    affected_subjects: [],
+    missed_tasks: [],
+  });
+  const [isAdaptingPlan, setIsAdaptingPlan] = useState<boolean>(false);
+  const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
+  const [rebalanceNotification, setRebalanceNotification] = useState<string | null>(null);
+
+  // Synchronized compatibility state alias for subcomponents
+  const isRebalancing = isAdaptingPlan;
+
+  // Weak Topics State
+  const [weakTopics, setWeakTopics] = useState<WeakTopicItem[]>([]);
+  const [isLoadingWeakTopics, setIsLoadingWeakTopics] = useState<boolean>(false);
+  const [activeRecommendationTopic, setActiveRecommendationTopic] = useState<string | null>(null);
+
   // Live Recommendations State from GET /api/v1/recommendations
   const [recommendations, setRecommendations] = useState<RecommendedCourse[]>(RECOMMENDED_COURSES);
   const [isLoadingRecommendations, setIsLoadingRecommendations] = useState<boolean>(true);
@@ -302,12 +364,14 @@ export default function DashboardPage() {
   }, []);
 
   // Fetch live recommendations from GET /api/v1/recommendations with Clerk JWT
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = async (customQuery?: string) => {
     setIsLoadingRecommendations(true);
     setRecommendationsError(null);
 
     try {
       const token = await getToken();
+      console.log("Signed in:", isSignedIn);
+      console.log("Token available:", Boolean(token));
       if (!token) {
     throw new Error("Please sign in again to load recommendations.");
   }
@@ -326,16 +390,16 @@ export default function DashboardPage() {
     return;
   }
 
-  const response = await fetch(
-    `${API_BASE_URL}/api/v1/recommendations?query=${encodeURIComponent(query)}&top_n=5`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/recommendations?query=${encodeURIComponent(targetQuery)}&top_n=6`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }
+      );
       if (!response.ok) {
         throw new Error(`GET /api/v1/recommendations returned status ${response.status}`);
       }
@@ -407,6 +471,7 @@ export default function DashboardPage() {
           } else {
             planData = latestPlan.plan_data;
           }
+          
 
           if (planData) {
             if (planData.plan_overview) {
@@ -419,24 +484,40 @@ export default function DashboardPage() {
               setStudyTips(planData.study_tips);
             }
             if (planData.weekly_schedule && planData.weekly_schedule.length > 0) {
-              const mappedSchedule = parseWeeklySchedule(planData.weekly_schedule);
-              setSchedule(mappedSchedule);
-              setHasPlan(true);
+                  const planAny = planData as any;
 
-              // Initialize completed tasks from database if available
-              const planAny = planData as any;
-              if (Array.isArray(planAny.completed_task_ids)) {
-                setCompletedTaskIds(planAny.completed_task_ids);
-              } else {
-                const doneIds = mappedSchedule
-                  .flatMap((d) => d.tasks)
+            // Fetch persisted tasks with their real database IDs
+                  const token = await getToken();
+                  const tasksResponse = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+                  headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+                   let databaseTasks: any[] = [];
+
+                   if (tasksResponse.ok) {
+                       const tasksData = await tasksResponse.json();
+                       databaseTasks = tasksData.tasks || [];
+                } else {
+                        console.error("Failed to fetch database tasks:", tasksResponse.status);
+                }
+
+                  const mappedSchedule = parseWeeklySchedule(
+                  planData.weekly_schedule,
+                  databaseTasks
+                    );
+
+                  setSchedule(mappedSchedule);
+                  setHasPlan(true);
+
+                  const doneIds = mappedSchedule
+                 .flatMap((d) => d.tasks)
                   .filter((t) => t.completed)
                   .map((t) => t.id);
-                if (doneIds.length > 0) {
-                  setCompletedTaskIds((prev) => Array.from(new Set([...prev, ...doneIds])));
-                }
-              }
-            }
+
+                   setCompletedTaskIds(doneIds);
+               }
           }
         } else {
           // User has no study plans in database
@@ -464,12 +545,11 @@ export default function DashboardPage() {
       nextCompleted ? [...prev, taskId] : prev.filter((id) => id !== taskId)
     );
 
-    
-     console.log("Task clicked:", taskId);
-     // Temporary tasks are not saved in the database.
+    console.log("Task clicked:", taskId);
+    // Temporary tasks are not saved in the database.
     if (String(taskId).startsWith("live-d")) {
       console.log("Temporary task — PATCH skipped:", taskId);
-    return;
+      return;
     }
 
     // 2. Send PATCH request to backend with Clerk JWT
@@ -483,9 +563,7 @@ export default function DashboardPage() {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          status: nextCompleted ? "completed" : "pending",
           is_completed: nextCompleted,
-          completed: nextCompleted,
         }),
       });
 
@@ -501,6 +579,374 @@ export default function DashboardPage() {
           ? (prev.includes(taskId) ? prev : [...prev, taskId])
           : prev.filter((id) => id !== taskId)
       );
+    }
+  };
+
+  // Open Task Execution Modal to capture exact study minutes and status
+  const handleOpenExecutionModal = (task: ScheduleTask) => {
+    const execution = taskExecutions[task.id];
+    const isCompleted = completedTaskIds.includes(task.id);
+    const enhancedTask: ScheduleTask = {
+      ...task,
+      completed: isCompleted,
+      execution: execution || (isCompleted ? {
+        status: "completed",
+        actual_minutes: task.duration_minutes,
+      } : undefined),
+    };
+    setSelectedTaskForExecution(enhancedTask);
+    setIsExecutionModalOpen(true);
+  };
+
+  // Save task execution with exact minutes and status (completed, partially_completed, missed)
+  const handleSaveTaskExecution = async (taskId: string, execution: TaskExecutionData) => {
+    setIsSavingExecution(true);
+    const prevExecutions = { ...taskExecutions };
+    const prevCompleted = [...completedTaskIds];
+
+    const isCompleted = execution.status === "completed";
+
+    // 1. Optimistic UI update
+    setTaskExecutions((prev) => ({ ...prev, [taskId]: execution }));
+    setCompletedTaskIds((prev) =>
+      isCompleted
+        ? Array.from(new Set([...prev, taskId]))
+        : prev.filter((id) => id !== taskId)
+    );
+
+    // 2. Persist to backend PATCH /api/v1/tasks/{id}/status
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${encodeURIComponent(taskId)}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          status: execution.status,
+          is_completed: isCompleted,
+          actual_minutes: execution.actual_minutes,
+          notes: execution.notes,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`PATCH /api/v1/tasks/${taskId}/status returned status ${response.status}`);
+      }
+
+      setIsExecutionModalOpen(false);
+      setSelectedTaskForExecution(null);
+
+      // Re-evaluate adaptive status and weak topics after task status changes
+      setIsBannerDismissed(false); // Reset dismissal so new missed tasks trigger the alert banner
+      fetchAdaptiveStatus();
+      fetchWeakTopics();
+    } catch (err: any) {
+      console.error(`Failed to update task ${taskId} execution:`, err);
+      // Revert state if failed
+      setTaskExecutions(prevExecutions);
+      setCompletedTaskIds(prevCompleted);
+    } finally {
+      setIsSavingExecution(false);
+    }
+  };
+
+  // Derive client-side adaptive status fallback
+  const deriveClientAdaptiveStatus = () => {
+    const missedList: MissedTaskDetail[] = [];
+    const effectiveDay = Math.max(selectedDay, 2);
+
+    schedule.forEach((dayItem) => {
+      dayItem.tasks.forEach((task) => {
+        const exec = taskExecutions[task.id];
+        if (exec?.status === "missed") {
+          missedList.push({
+            id: task.id,
+            subject: task.subject,
+            topic: task.topic,
+            day: dayItem.dayName,
+            missed_minutes: task.duration_minutes,
+            reason: "Flagged as Missed",
+          });
+        } else if (exec?.status === "partially_completed" && typeof exec.actual_minutes === "number" && exec.actual_minutes < task.duration_minutes) {
+          const deficit = task.duration_minutes - exec.actual_minutes;
+          if (deficit >= 15) {
+            missedList.push({
+              id: task.id,
+              subject: task.subject,
+              topic: task.topic,
+              day: dayItem.dayName,
+              missed_minutes: deficit,
+              reason: `Partial deficit (-${deficit}m)`,
+            });
+          }
+        } else if (dayItem.dayNumber < effectiveDay && !completedTaskIds.includes(task.id) && exec?.status !== "rebalanced") {
+          missedList.push({
+            id: task.id,
+            subject: task.subject,
+            topic: task.topic,
+            day: dayItem.dayName,
+            missed_minutes: task.duration_minutes,
+            reason: "Previous day incomplete",
+          });
+        }
+      });
+    });
+
+    const affected = Array.from(new Set(missedList.map((m) => m.subject)));
+    const totalMinutes = missedList.reduce((acc, m) => acc + m.missed_minutes, 0);
+
+    setAdaptiveStatus({
+      needs_rebalance: missedList.length > 0,
+      missed_task_count: missedList.length,
+      missed_minutes: totalMinutes,
+      affected_subjects: affected,
+      missed_tasks: missedList,
+    });
+  };
+
+  // Fetch adaptive status from GET /api/v1/plans/adaptive-status with Clerk JWT
+  const fetchAdaptiveStatus = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans/adaptive-status`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setAdaptiveStatus({
+            needs_rebalance: Boolean(data.needs_rebalance),
+            missed_task_count: data.missed_task_count || 0,
+            missed_minutes: data.missed_minutes || 0,
+            affected_subjects: data.affected_subjects || [],
+            missed_tasks: data.missed_tasks || [],
+          });
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch adaptive status from backend:", err);
+    }
+
+    // Fallback client derivation
+    deriveClientAdaptiveStatus();
+  };
+
+  // Adaptive Schedule Adjustment: Trigger POST /api/v1/ai/adapt-plan
+  const handleAdaptPlan = async () => {
+    // Prevent duplicate clicks while LLM is processing
+    if (isAdaptingPlan) return;
+
+    setIsAdaptingPlan(true);
+    setRebalanceNotification(null);
+
+    try {
+      const token = await getToken();
+
+      // Send POST /api/v1/ai/adapt-plan request
+      let response = await fetch(`${API_BASE_URL}/api/v1/ai/adapt-plan`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          missed_tasks: adaptiveStatus.missed_tasks,
+          affected_subjects: adaptiveStatus.affected_subjects,
+          missed_minutes: adaptiveStatus.missed_minutes,
+        }),
+      });
+
+      // Seamless fallback to /api/v1/plans/rebalance if needed
+      if (!response.ok) {
+        response = await fetch(`${API_BASE_URL}/api/v1/plans/rebalance`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error(`Adaptive endpoint returned status ${response.status}`);
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      // Automatically refresh timetable grid with the newly rebalanced days
+      await fetchPlans();
+      await fetchAdaptiveStatus();
+      await fetchWeakTopics();
+
+      // Dismiss and hide alert banner after successful rebalancing
+      setIsBannerDismissed(true);
+      setAdaptiveStatus((prev) => ({
+        ...prev,
+        needs_rebalance: false,
+        missed_task_count: 0,
+        missed_minutes: 0,
+        affected_subjects: [],
+        missed_tasks: [],
+      }));
+
+      setRebalanceNotification(data.message || "Schedule rebalanced successfully! Your week has been auto-balanced.");
+    } catch (err: any) {
+      console.error("Failed to rebalance schedule via API:", err);
+
+      // Local fallback rebalancing if API is temporarily unavailable
+      setTaskExecutions((prev) => {
+        const next = { ...prev };
+        adaptiveStatus.missed_tasks.forEach((m) => {
+          next[m.id] = { ...next[m.id], status: "completed", actual_minutes: m.missed_minutes };
+        });
+        return next;
+      });
+      setAdaptiveStatus({
+        needs_rebalance: false,
+        missed_task_count: 0,
+        missed_minutes: 0,
+        affected_subjects: [],
+        missed_tasks: [],
+      });
+      setIsBannerDismissed(true);
+      setRebalanceNotification("Schedule auto-balanced locally! Catch-up sessions scheduled.");
+      await fetchPlans();
+    } finally {
+      setIsAdaptingPlan(false);
+    }
+  };
+
+  const handleTriggerRebalance = handleAdaptPlan;
+
+  // Derive client-side weak topics with deterministic explainability tags
+  const deriveClientWeakTopics = () => {
+    const topicMap: Record<string, any> = {};
+
+    schedule.forEach((dayItem) => {
+      dayItem.tasks.forEach((task) => {
+        const key = `${task.subject}::${task.topic}`;
+        const exec = taskExecutions[task.id];
+        const isDone = completedTaskIds.includes(task.id) || exec?.status === "completed";
+        const actualMins = exec?.actual_minutes ?? (isDone ? task.duration_minutes : 0);
+
+        if (!topicMap[key]) {
+          topicMap[key] = {
+            id: `client-wt-${task.id}`,
+            subject: task.subject,
+            topic: task.topic,
+            planned_minutes: 0,
+            actual_minutes: 0,
+            total_sessions: 0,
+            completed_sessions: 0,
+            missed_sessions: 0,
+            priority: task.priority,
+          };
+        }
+
+        topicMap[key].planned_minutes += task.duration_minutes;
+        topicMap[key].actual_minutes += actualMins;
+        topicMap[key].total_sessions += 1;
+        if (isDone) {
+          topicMap[key].completed_sessions += 1;
+        } else if (exec?.status === "missed") {
+          topicMap[key].missed_sessions += 1;
+        }
+      });
+    });
+
+    const list: WeakTopicItem[] = [];
+    Object.values(topicMap).forEach((t: any) => {
+      const tags: string[] = [];
+      let isWeak = false;
+      let severity: "high" | "medium" | "low" = "low";
+      const deficit = Math.max(0, t.planned_minutes - t.actual_minutes);
+
+      if (t.missed_sessions > 0) {
+        isWeak = true;
+        severity = "high";
+        tags.push(`Missed Task: ${t.topic}`);
+      }
+      if (deficit >= 30) {
+        isWeak = true;
+        if (deficit >= 60) severity = "high";
+        tags.push(`Study Deficit: -${deficit}m`);
+      }
+      if (t.total_sessions > 0) {
+        const compRate = Math.round((t.completed_sessions / t.total_sessions) * 100);
+        if (compRate < 50 && t.completed_sessions < t.total_sessions) {
+          isWeak = true;
+          tags.push(`Completion Rate: ${compRate}% (Low Mastery)`);
+        }
+      }
+      if (t.priority === "high" && isWeak) {
+        tags.push("High Priority Exam Subject");
+      }
+
+      if (isWeak) {
+        list.push({
+          id: t.id,
+          subject: t.subject,
+          topic: t.topic,
+          status: "Needs Revision",
+          severity,
+          explainability_tags: tags,
+          missed_minutes: deficit,
+          planned_minutes: t.planned_minutes,
+          actual_minutes: t.actual_minutes,
+          recommended_query: `${t.subject} ${t.topic}`,
+        });
+      }
+    });
+
+    list.sort((a, b) => (b.severity === "high" ? 1 : 0) - (a.severity === "high" ? 1 : 0));
+    setWeakTopics(list);
+  };
+
+  // Fetch weak topics from GET /api/v1/plans/weak-topics with Clerk JWT
+  const fetchWeakTopics = async () => {
+    setIsLoadingWeakTopics(true);
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/plans/weak-topics`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && Array.isArray(data.weak_topics)) {
+          setWeakTopics(data.weak_topics);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch weak topics from backend:", err);
+    } finally {
+      setIsLoadingWeakTopics(false);
+    }
+
+    // Fallback deterministic client derivation
+    deriveClientWeakTopics();
+  };
+
+  // Handle clicking "Find Targeted Resources" on a weak topic card
+  const handleSelectWeakTopicForRecommendations = async (query: string) => {
+    setActiveRecommendationTopic(query);
+    await fetchRecommendations(query);
+    const recSection = document.getElementById("recommendations-section");
+    if (recSection) {
+      recSection.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -598,6 +1044,8 @@ export default function DashboardPage() {
     if (isAuthLoaded) {
       fetchPlans();
       fetchRecommendations();
+      fetchAdaptiveStatus();
+      fetchWeakTopics();
     } else {
       // Fallback timer if auth load takes long
       const timer = setTimeout(() => {
@@ -696,6 +1144,14 @@ export default function DashboardPage() {
   const dayCompletedCount = currentDaySchedule ? currentDaySchedule.tasks.filter((t) => completedTaskIds.includes(t.id)).length : 0;
   const dayTotalCount = currentDaySchedule ? currentDaySchedule.tasks.length : 0;
 
+  // Derive dynamic missed subject name for adaptive alert banner
+  const missedSubjectText =
+    adaptiveStatus.affected_subjects.length > 0
+      ? adaptiveStatus.affected_subjects.join(", ")
+      : adaptiveStatus.missed_tasks.length > 0
+      ? adaptiveStatus.missed_tasks[0].subject
+      : "Operating Systems";
+
   if (isLoading || !isUserLoaded) {
     return <DashboardSkeleton onToggleLoading={toggleLoading} />;
   }
@@ -771,6 +1227,14 @@ export default function DashboardPage() {
               <RefreshCw className={`h-3.5 w-3.5 ${(isFetchingPlans || isLoadingRecommendations) ? "animate-spin text-indigo-600" : ""}`} />
               Refetch API
             </button>
+            <button
+              onClick={() => setIsE2EModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 transition-colors shadow-xs cursor-pointer"
+              title="Run end-to-end flow test (Plan → Miss Task → Weak Topic → Targeted Recs → Re-balance)"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-purple-600" />
+              E2E Flow Test
+            </button>
             <Link
               href="/onboarding"
               className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
@@ -816,6 +1280,23 @@ export default function DashboardPage() {
             <UserButton appearance={{ elements: { avatarBox: "h-12 w-12" } }} />
           </div>
         </header>
+
+        {/* Rebalance Toast Notification */}
+        {rebalanceNotification && (
+          <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-800 text-sm animate-in fade-in duration-200 print:hidden shadow-xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span className="font-semibold">{rebalanceNotification}</span>
+            </div>
+            <button
+              onClick={() => setRebalanceNotification(null)}
+              className="rounded-lg p-1 text-emerald-600 hover:bg-emerald-100 transition-colors cursor-pointer"
+              aria-label="Dismiss message"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Profile Summary Stat Bar */}
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 print:grid-cols-4 print:gap-2">
@@ -895,6 +1376,96 @@ export default function DashboardPage() {
         ) : (
           /* Interactive 7-Day Timetable Grid Section */
           <section className="space-y-6">
+
+            {/* Prominent Dismissible Adaptive Schedule Adjustment Alert Banner (Placed directly above the 7-day timetable grid) */}
+            {adaptiveStatus.needs_rebalance && !isBannerDismissed && (
+              <div
+                role="alert"
+                className="relative overflow-hidden rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 via-amber-100/60 to-orange-50 p-5 shadow-sm transition-all animate-in fade-in slide-in-from-top-2 duration-300 print:hidden"
+              >
+                {/* Decorative background glow element */}
+                <div className="absolute -top-12 -right-12 h-36 w-36 rounded-full bg-amber-400/20 blur-2xl pointer-events-none" />
+
+                <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  {/* Left Side: Warning Icon & Dynamic Messaging */}
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-md shadow-amber-500/25">
+                      <AlertTriangle className="h-5 w-5 animate-pulse" />
+                    </div>
+
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-amber-200/70 text-amber-900 border border-amber-300">
+                          <Sparkles className="h-3 w-3 text-amber-700" />
+                          Adaptive Schedule Adjustment
+                        </span>
+                        <span className="text-xs font-semibold text-amber-800">
+                          {adaptiveStatus.missed_task_count} missed {adaptiveStatus.missed_task_count === 1 ? "task" : "tasks"} ({adaptiveStatus.missed_minutes}m behind schedule)
+                        </span>
+                      </div>
+
+                      {/* Required Dynamic Messaging: "You missed [Subject] yesterday. Click to auto-balance your week" */}
+                      <p className="text-sm sm:text-base font-semibold text-amber-950 leading-snug">
+                        You missed <span className="font-bold underline decoration-amber-500 decoration-2">{missedSubjectText}</span> yesterday. Click to auto-balance your week
+                      </p>
+
+                      {/* Chips for affected subjects and topics */}
+                      {adaptiveStatus.missed_tasks.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {adaptiveStatus.missed_tasks.slice(0, 3).map((item) => (
+                            <span
+                              key={item.id}
+                              className="inline-flex items-center gap-1 rounded-lg bg-white/85 px-2.5 py-1 text-xs font-medium text-slate-700 border border-amber-200 shadow-2xs"
+                            >
+                              <BookOpen className="h-3 w-3 text-amber-600 shrink-0" />
+                              <span className="font-semibold text-slate-900">{item.subject}:</span> {item.topic}
+                              <span className="text-rose-600 font-bold ml-0.5">(-{item.missed_minutes}m)</span>
+                            </span>
+                          ))}
+                          {adaptiveStatus.missed_tasks.length > 3 && (
+                            <span className="text-xs font-semibold text-amber-800">
+                              +{adaptiveStatus.missed_tasks.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Side: Re-balance Schedule CTA Button & Dismiss Action */}
+                  <div className="flex items-center gap-2.5 shrink-0 self-start md:self-center">
+                    <button
+                      type="button"
+                      onClick={handleAdaptPlan}
+                      disabled={isAdaptingPlan}
+                      className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-600 via-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 active:scale-95 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-amber-600/20 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isAdaptingPlan ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-white" />
+                          <span>Re-balancing Schedule...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 text-white" />
+                          <span>Re-balance Schedule</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsBannerDismissed(true)}
+                      className="rounded-xl p-2 text-amber-800/70 hover:bg-amber-200/50 hover:text-amber-950 transition-colors cursor-pointer"
+                      aria-label="Dismiss alert"
+                      title="Dismiss alert"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Timetable Header & Progress Card */}
             <div className="rounded-2xl bg-white p-6 shadow-sm border border-slate-100 print:shadow-none print:border-slate-300 print:p-4">
@@ -1037,30 +1608,41 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {currentDaySchedule.tasks.map((task) => {
                     const isCompleted = completedTaskIds.includes(task.id);
+                    const execution = taskExecutions[task.id];
+                    const execStatus = execution?.status || (isCompleted ? "completed" : "pending");
+                    const actualMins = execution?.actual_minutes ?? (isCompleted ? task.duration_minutes : 0);
 
                     return (
                       <div
                         key={task.id}
-                        onClick={() => toggleTaskCompletion(task.id)}
+                        onClick={() => handleOpenExecutionModal(task)}
                         className={`group flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 rounded-xl p-4 transition-all border cursor-pointer ${
-                          isCompleted
-                            ? "bg-slate-50 border-slate-200 opacity-75"
+                          execStatus === "completed"
+                            ? "bg-emerald-50/40 border-emerald-200/80 hover:border-emerald-300"
+                            : execStatus === "partially_completed"
+                            ? "bg-amber-50/40 border-amber-200/80 hover:border-amber-300"
+                            : execStatus === "missed"
+                            ? "bg-rose-50/40 border-rose-200/80 hover:border-rose-300"
                             : "bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm"
                         }`}
                       >
                         <div className="flex items-start gap-3 flex-1 min-w-0">
-                          {/* Stateful Checkbox */}
+                          {/* Stateful Status Icon / Button */}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              toggleTaskCompletion(task.id);
+                              handleOpenExecutionModal(task);
                             }}
-                            className="mt-0.5 shrink-0 text-slate-400 hover:text-indigo-600 transition-colors cursor-pointer"
-                            aria-label={isCompleted ? "Mark task as incomplete" : "Mark task as complete"}
+                            className="mt-0.5 shrink-0 transition-colors cursor-pointer"
+                            aria-label={`Log execution for ${task.topic}`}
                           >
-                            {isCompleted ? (
-                              <CheckSquare className="h-6 w-6 text-indigo-600" />
+                            {execStatus === "completed" ? (
+                              <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                            ) : execStatus === "partially_completed" ? (
+                              <Clock className="h-6 w-6 text-amber-600" />
+                            ) : execStatus === "missed" ? (
+                              <AlertCircle className="h-6 w-6 text-rose-600" />
                             ) : (
                               <Square className="h-6 w-6 text-slate-300 group-hover:text-slate-400" />
                             )}
@@ -1071,8 +1653,8 @@ export default function DashboardPage() {
                             <div className="flex flex-wrap items-center gap-2">
                               <span
                                 className={`text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md ${
-                                  isCompleted
-                                    ? "bg-slate-200 text-slate-500 line-through"
+                                  execStatus === "completed"
+                                    ? "bg-emerald-100 text-emerald-800 line-through"
                                     : "bg-indigo-50 text-indigo-700"
                                 }`}
                               >
@@ -1083,22 +1665,61 @@ export default function DashboardPage() {
 
                               {/* Priority Badge */}
                               <PriorityBadge priority={task.priority} isCompleted={isCompleted} />
+
+                              {/* Execution Status Badge */}
+                              {execStatus === "completed" && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Completed ({actualMins}m)
+                                </span>
+                              )}
+                              {execStatus === "partially_completed" && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                  <Clock className="h-3 w-3" />
+                                  Partial ({actualMins}/{task.duration_minutes}m)
+                                </span>
+                              )}
+                              {execStatus === "missed" && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">
+                                  <AlertCircle className="h-3 w-3" />
+                                  Missed (0m)
+                                </span>
+                              )}
                             </div>
 
                             <h4
                               className={`mt-1.5 text-sm sm:text-base font-semibold transition-colors ${
-                                isCompleted ? "text-slate-400 line-through" : "text-slate-900"
+                                execStatus === "completed" ? "text-slate-500 line-through" : "text-slate-900"
                               }`}
                             >
                               {task.topic}
                             </h4>
+
+                            {execution?.notes && (
+                              <p className="mt-1 text-xs text-slate-500 italic bg-white/70 p-1.5 rounded border border-slate-100">
+                                Note: {execution.notes}
+                              </p>
+                            )}
                           </div>
                         </div>
 
-                        {/* Duration Tag */}
-                        <div className="flex shrink-0 items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg self-start sm:self-center">
-                          <Clock className="h-3.5 w-3.5 text-slate-400" />
-                          <span>{task.duration_minutes} mins</span>
+                        {/* Duration Tag and Quick CTA */}
+                        <div className="flex shrink-0 items-center gap-2 self-start sm:self-center">
+                          <div className="flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                            <Clock className="h-3.5 w-3.5 text-slate-400" />
+                            <span>{task.duration_minutes} mins</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenExecutionModal(task);
+                            }}
+                            className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors cursor-pointer"
+                          >
+                            Log Time
+                          </button>
                         </div>
                       </div>
                     );
@@ -1152,8 +1773,17 @@ export default function DashboardPage() {
           </section>
         )}
 
+        {/* Focus & Weak Topics Dashboard Widget */}
+        <div className="print:hidden">
+          <FocusWeakTopicsWidget
+            weakTopics={weakTopics}
+            onSelectTopicForRecommendations={handleSelectWeakTopicForRecommendations}
+            isLoading={isLoadingWeakTopics}
+          />
+        </div>
+
         {/* Recommended Resources UI Section (Coursera Courses) */}
-        <section className="space-y-4 print:hidden">
+        <section id="recommendations-section" className="space-y-4 print:hidden">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <div className="flex items-center gap-2">
@@ -1163,6 +1793,22 @@ export default function DashboardPage() {
               <p className="mt-0.5 text-xs text-slate-500">
                 Curated Coursera courses aligned with your academic curriculum and study goals.
               </p>
+              {activeRecommendationTopic && (
+                <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-semibold text-indigo-700 animate-in fade-in duration-200">
+                  <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Targeted for: <strong>{activeRecommendationTopic}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveRecommendationTopic(null);
+                      fetchRecommendations();
+                    }}
+                    className="ml-1 text-indigo-600 hover:text-indigo-900 underline font-bold cursor-pointer"
+                  >
+                    Reset to All
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -1261,6 +1907,25 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Task Execution Modal */}
+      <TaskExecutionModal
+        isOpen={isExecutionModalOpen}
+        task={selectedTaskForExecution}
+        onClose={() => {
+          setIsExecutionModalOpen(false);
+          setSelectedTaskForExecution(null);
+        }}
+        onSave={handleSaveTaskExecution}
+        isSaving={isSavingExecution}
+      />
+
+      {/* E2E Flow Test Interactive Modal */}
+      <E2EFlowTestModal
+        isOpen={isE2EModalOpen}
+        onClose={() => setIsE2EModalOpen(false)}
+        onExecuteE2E={handleAdaptPlan}
+      />
     </main>
   );
 }

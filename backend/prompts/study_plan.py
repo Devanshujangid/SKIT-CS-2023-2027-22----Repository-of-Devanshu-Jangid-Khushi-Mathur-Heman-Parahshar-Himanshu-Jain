@@ -208,15 +208,35 @@ JSON SCHEMA SPECIFICATION:
 """
 
 
+
 def build_study_plan_prompt(
     data: OnboardingDataInput,
     learning_history: dict | None = None,
 ) -> str:
     """
-    Constructs the deterministic user prompt with serialized onboarding data.
+    Constructs the study-plan prompt using onboarding data and recent learning history.
     """
-    subjects_formatted = json.dumps([s.model_dump() for s in data.subjects], indent=2)
+
+    subjects_formatted = json.dumps(
+        [s.model_dump() for s in data.subjects],
+        indent=2,
+    )
     goals_formatted = json.dumps(data.goals, indent=2)
+
+    history = learning_history or {
+        "completed_tasks": [],
+        "missed_sessions": [],
+        "summary": {
+            "completed_count": 0,
+            "missed_count": 0,
+        },
+    }
+
+    learning_history_formatted = json.dumps(
+        history,
+        indent=2,
+        ensure_ascii=False,
+    )
 
     prompt = f"""
 Student Onboarding Profile:
@@ -226,13 +246,39 @@ Student Onboarding Profile:
 - Enrolled Subjects & Specific Target Scores:
 {subjects_formatted}
 
-Please generate the structured 7-day study plan according to the system instructions and exact JSON schema.
+Recent Learning History (last 7 calendar days):
+{learning_history_formatted}
+
+ADAPTIVE LEARNING REQUIREMENTS:
+1. Use the recent learning history above when preparing the new weekly schedule.
+2. For missed sessions, reschedule important unfinished topics across the upcoming
+   week where appropriate. Do not overload any day beyond the student's available
+   daily study hours.
+3. For completed sessions, avoid unnecessarily repeating the same topic. Progress
+   to the next logical topic or use revision/practice when useful.
+4. If sessions were repeatedly missed, distribute the workload realistically rather
+   than adding all missed work to one day.
+5. If the history is empty or contains zero completed and missed sessions, create
+   the plan using onboarding data without assuming the student has missed anything.
+6. Treat learning history as supporting context. Do not invent completed sessions,
+   missed sessions, subjects, or topics that are not supported by the supplied data.
+7. Continue to follow all subject-name, time-balance, chronological-ordering,
+   target-score, and search-keyword requirements in the system instructions.
+
+Please generate the structured 7-day study plan according to the system
+instructions and exact JSON schema.
+
 IMPORTANT:
-- Use the EXACT enrolled subject names in all schedule sessions (do not alter course codes, numbers, or special characters).
-- Ensure dynamic exam revision milestones (`monthly_milestones`) and key deliverables explicitly reflect and target the specific target scores and academic goals requested by the student.
-- Generate high-yield, specific `search_keywords` combining subjects and technical concepts to power the external course recommendation pipeline.
+- Use the EXACT enrolled subject names in all schedule sessions.
+- Ensure monthly milestones and key deliverables reflect the student's target
+  scores and academic goals.
+- Generate 3 to 8 high-relevance search_keywords combining subjects with
+  technical concepts covered in the schedule.
+- Respond ONLY with valid JSON matching the required schema.
 """
+
     return prompt.strip()
+
 
 
 def validate_target_score_alignment(
