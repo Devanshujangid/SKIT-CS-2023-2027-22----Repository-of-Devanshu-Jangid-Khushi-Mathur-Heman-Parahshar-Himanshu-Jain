@@ -384,8 +384,9 @@ export default function DashboardPage() {
     : [];
 
   const query = subjects.join(" ").trim();
+  const targetQuery = customQuery && customQuery.trim() ? customQuery.trim() : query;
 
-  if (!query) {
+  if (!targetQuery) {
     setRecommendations([]);
     return;
   }
@@ -503,10 +504,21 @@ export default function DashboardPage() {
                         console.error("Failed to fetch database tasks:", tasksResponse.status);
                 }
 
+                  const taskExecutionsMap: Record<string, TaskExecutionData> = {};
+                  databaseTasks.forEach((t: any) => {
+                    if (t.id) {
+                      taskExecutionsMap[t.id] = {
+                        status: t.is_completed ? "completed" : "missed",
+                        actual_minutes: t.actual_minutes || 0,
+                        notes: t.description || t.notes || "",
+                      };
+                    }
+                  });
+
                   const mappedSchedule = parseWeeklySchedule(
-                  planData.weekly_schedule,
-                  databaseTasks
-                    );
+                    planData.weekly_schedule,
+                    taskExecutionsMap
+                  );
 
                   setSchedule(mappedSchedule);
                   setHasPlan(true);

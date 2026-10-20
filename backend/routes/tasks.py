@@ -54,17 +54,8 @@ async def get_tasks(
 
     try:
         db = get_db()
- backend-Heman
         user_id = get_or_create_user(
             db, clerk_id, email=user_data.get("email")
-
-        user_res = (
-            db.table("users")
-            .select("id")
-            .eq("clerk_id", clerk_id)
-            .limit(1)
-            .execute() 
- main
         )
 
         tasks_res = (
