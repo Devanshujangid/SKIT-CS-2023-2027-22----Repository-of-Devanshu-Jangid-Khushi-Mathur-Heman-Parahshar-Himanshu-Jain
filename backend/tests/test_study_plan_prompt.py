@@ -19,9 +19,13 @@ from prompts.study_plan import (
     SubjectInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
     REGENERATION_SYSTEM_INSTRUCTION,
+    ADAPTIVE_PLAN_SYSTEM_INSTRUCTION,
     RegenerationInput,
+    MissedTaskInput,
+    AdaptivePlanInput,
     build_study_plan_prompt,
     build_regeneration_prompt,
+    build_adaptive_plan_prompt,
     validate_study_plan_output,
     validate_target_score_alignment,
     validate_subject_name_fidelity,
@@ -661,6 +665,244 @@ class TestSearchKeywordsRecommendationIntegration(unittest.TestCase):
         self.assertIn("OPTIMIZED SEARCH KEYWORDS", STUDY_PLAN_SYSTEM_INSTRUCTION)
         self.assertIn("search_keywords", REGENERATION_SYSTEM_INSTRUCTION)
         self.assertIn("OPTIMIZED SEARCH KEYWORDS", REGENERATION_SYSTEM_INSTRUCTION)
+
+
+class TestAdaptivePlanPrompt(unittest.TestCase):
+    """
+    Tests AdaptivePlanInput schema, MissedTaskInput schema,
+    ADAPTIVE_PLAN_SYSTEM_INSTRUCTION rules, and prompt builder.
+    """
+
+    def setUp(self):
+        self.valid_plan = StudyPlanOutputSchema.model_validate({
+            "plan_overview": {
+                "student_semester": 5,
+                "daily_target_hours": 4.0,
+                "weekly_total_hours": 28.0,
+                "primary_focus": "Operating Systems & Databases",
+                "strategy_summary": "Intensive weekly core CS study."
+            },
+            "weekly_schedule": [
+                {
+                    "day": "Monday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Process Synchronization",
+                            "duration_hours": 2.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "09:00",
+                            "end_time": "11:00"
+                        },
+                        {
+                            "subject": "Database Management Systems",
+                            "topic": "SQL Queries",
+                            "duration_hours": 2.0,
+                            "activity_type": "practice_problems",
+                            "priority": "medium",
+                            "start_time": "11:30",
+                            "end_time": "13:30"
+                        }
+                    ]
+                },
+                {
+                    "day": "Tuesday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Computer Networks",
+                            "topic": "TCP/IP Stack",
+                            "duration_hours": 4.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                },
+                {
+                    "day": "Wednesday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Theory of Computation",
+                            "topic": "DFA & NFA",
+                            "duration_hours": 4.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "medium",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                },
+                {
+                    "day": "Thursday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Memory Management",
+                            "duration_hours": 4.0,
+                            "activity_type": "core_concept_study",
+                            "priority": "high",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                },
+                {
+                    "day": "Friday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Database Management Systems",
+                            "topic": "Indexing & B-Trees",
+                            "duration_hours": 4.0,
+                            "activity_type": "practice_problems",
+                            "priority": "medium",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                },
+                {
+                    "day": "Saturday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "General Revision",
+                            "topic": "Weekly Revision Quiz",
+                            "duration_hours": 4.0,
+                            "activity_type": "revision_quiz",
+                            "priority": "low",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                },
+                {
+                    "day": "Sunday",
+                    "total_hours": 4.0,
+                    "sessions": [
+                        {
+                            "subject": "Operating Systems",
+                            "topic": "Deadlocks & Semaphores Review",
+                            "duration_hours": 4.0,
+                            "activity_type": "practice_problems",
+                            "priority": "high",
+                            "start_time": "10:00",
+                            "end_time": "14:00"
+                        }
+                    ]
+                }
+            ],
+            "monthly_milestones": [
+                {
+                    "week": 1,
+                    "milestone": "Master Concurrency & Process Synchronization",
+                    "key_deliverable": "Score 90%+ on OS Quiz"
+                }
+            ],
+            "study_tips": [
+                "Practice classical synchronization problems (Dining Philosophers, Producer-Consumer)."
+            ],
+            "search_keywords": [
+                "Operating Systems Process Synchronization",
+                "Database Management Systems SQL Queries"
+            ]
+        })
+
+        self.missed_high_priority = MissedTaskInput(
+            task_id="task-os-sync-1",
+            subject="Operating Systems",
+            topic="Process Synchronization",
+            priority="high",
+            missed_day="Monday",
+            planned_duration_hours=2.0,
+            actual_minutes_studied=0.0,
+            deficit_hours=2.0,
+            reason="Missed due to college lab exam"
+        )
+
+        self.missed_medium_priority = MissedTaskInput(
+            task_id="task-dbms-sql-1",
+            subject="Database Management Systems",
+            topic="SQL Queries",
+            priority="medium",
+            missed_day="Monday",
+            planned_duration_hours=2.0,
+            actual_minutes_studied=30.0,
+            deficit_hours=1.5,
+            reason="Partially completed deficit (-90m)"
+        )
+
+    def test_missed_task_input_valid(self):
+        task = self.missed_high_priority
+        self.assertEqual(task.subject, "Operating Systems")
+        self.assertEqual(task.priority, "high")
+        self.assertEqual(task.deficit_hours, 2.0)
+        self.assertEqual(task.missed_day, "Monday")
+
+    def test_missed_task_input_empty_subject_fails(self):
+        with self.assertRaises(ValidationError):
+            MissedTaskInput(
+                subject="",
+                topic="Process Synchronization",
+                priority="high",
+                missed_day="Monday",
+                planned_duration_hours=2.0,
+                deficit_hours=2.0
+            )
+
+    def test_adaptive_plan_input_valid(self):
+        adaptive_input = AdaptivePlanInput(
+            current_plan=self.valid_plan,
+            missed_tasks=[self.missed_high_priority, self.missed_medium_priority],
+            current_day="Wednesday",
+            daily_hours_limit=4.0
+        )
+        self.assertEqual(len(adaptive_input.missed_tasks), 2)
+        self.assertEqual(adaptive_input.current_day, "Wednesday")
+        
+        # Test helper methods
+        high_pri_tasks = adaptive_input.get_high_priority_missed_tasks()
+        self.assertEqual(len(high_pri_tasks), 1)
+        self.assertEqual(high_pri_tasks[0].subject, "Operating Systems")
+
+        remaining = adaptive_input.get_remaining_days()
+        self.assertEqual(remaining, ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
+
+    def test_adaptive_plan_input_empty_missed_tasks_fails(self):
+        with self.assertRaises(ValidationError):
+            AdaptivePlanInput(
+                current_plan=self.valid_plan,
+                missed_tasks=[],
+                current_day="Wednesday"
+            )
+
+    def test_adaptive_system_instruction_rules(self):
+        self.assertIn("MANDATORY HIGH-PRIORITY RECOVERY", ADAPTIVE_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("FORWARD-ONLY ALLOCATION", ADAPTIVE_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("STRICT DAILY STUDY HOURS CEILING", ADAPTIVE_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("SUBJECT FIDELITY & ZERO HALLUCINATION", ADAPTIVE_PLAN_SYSTEM_INSTRUCTION)
+        self.assertIn("search_keywords", ADAPTIVE_PLAN_SYSTEM_INSTRUCTION)
+
+    def test_build_adaptive_plan_prompt(self):
+        adaptive_input = AdaptivePlanInput(
+            current_plan=self.valid_plan,
+            missed_tasks=[self.missed_high_priority],
+            current_day="Wednesday",
+            daily_hours_limit=4.0
+        )
+        prompt = build_adaptive_plan_prompt(adaptive_input)
+        self.assertIn("Operating Systems", prompt)
+        self.assertIn("Process Synchronization", prompt)
+        self.assertIn("Wednesday", prompt)
+        self.assertIn("Available Remaining Days for Re-allocation: [Wednesday, Thursday, Friday, Saturday, Sunday]", prompt)
+        self.assertIn("Strict Daily Available Study Hours Limit: 4.0 hours/day", prompt)
+        self.assertIn("Re-allocate all missed HIGH-PRIORITY subjects", prompt)
 
 
 if __name__ == "__main__":

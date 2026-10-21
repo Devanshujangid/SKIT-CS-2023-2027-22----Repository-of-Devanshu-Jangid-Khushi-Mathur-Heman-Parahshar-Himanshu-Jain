@@ -22,9 +22,13 @@ from prompts.study_plan import (
     OnboardingDataInput,
     STUDY_PLAN_SYSTEM_INSTRUCTION,
     REGENERATION_SYSTEM_INSTRUCTION,
+    ADAPTIVE_PLAN_SYSTEM_INSTRUCTION,
     RegenerationInput,
+    MissedTaskInput,
+    AdaptivePlanInput,
     build_study_plan_prompt,
     build_regeneration_prompt,
+    build_adaptive_plan_prompt,
     validate_study_plan_output,
     StudyPlanOutputSchema,
 )
