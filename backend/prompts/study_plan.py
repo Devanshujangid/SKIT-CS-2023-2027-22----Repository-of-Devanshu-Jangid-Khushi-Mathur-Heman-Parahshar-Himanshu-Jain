@@ -153,6 +153,77 @@ class RegenerationInput(BaseModel):
         return value.strip()
 
 
+# ---------------------------------------------------------------------------
+# Adaptive Plan / Dynamic Re-Allocation Schemas
+# ---------------------------------------------------------------------------
+
+class MissedTaskInput(BaseModel):
+    task_id: Optional[str] = Field(None, description="Unique identifier of the missed session/task")
+    subject: str = Field(..., description="Subject name of the missed session (e.g., 'Operating Systems')")
+    topic: str = Field(..., description="Specific topic or unit missed (e.g., 'Process Synchronization')")
+    priority: PriorityLevel = Field("high", description="Priority level of the missed task ('high', 'medium', 'low')")
+    missed_day: DayName = Field(..., description="Day of the week on which the session was originally scheduled and missed")
+    planned_duration_hours: float = Field(..., ge=0.1, description="Original planned duration in hours (e.g., 1.5)")
+    actual_minutes_studied: float = Field(0.0, ge=0.0, description="Actual minutes completed by the student before missing or dropping")
+    deficit_hours: float = Field(..., ge=0.0, description="Net remaining hours needed to recover this topic")
+    reason: Optional[str] = Field("Missed study session", description="Reason for deficit (e.g., 'Incomplete', 'Exam prep overlap', 'Skipped')")
+
+    @field_validator("subject", "topic")
+    @classmethod
+    def validate_non_empty_strings(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("Subject and topic cannot be empty strings")
+        return value.strip()
+
+
+class AdaptivePlanInput(BaseModel):
+    current_plan: StudyPlanOutputSchema = Field(
+        ...,
+        description="The active 7-day study plan to be dynamically rebalanced"
+    )
+    missed_tasks: List[MissedTaskInput] = Field(
+        ...,
+        description="List of missed study sessions, with special emphasis on high-priority subjects"
+    )
+    current_day: DayName = Field(
+        ...,
+        description="The current day of the week (e.g., 'Wednesday'). Re-allocation only targets this day and subsequent days."
+    )
+    daily_hours_limit: Optional[float] = Field(
+        None,
+        ge=0.5,
+        le=16.0,
+        description="Maximum available study hours per day to enforce non-overload invariant"
+    )
+    onboarding_data: Optional[OnboardingDataInput] = Field(
+        None,
+        description="Optional student profile constraints (enrolled subjects, target scores, semester, goals)"
+    )
+    adaptation_goal: Optional[str] = Field(
+        "Dynamically re-allocate missed high-priority subjects into remaining days without exceeding daily study hours",
+        description="Explicit rebalancing objective"
+    )
+
+    @field_validator("missed_tasks")
+    @classmethod
+    def validate_missed_tasks_not_empty(cls, value: List[MissedTaskInput]) -> List[MissedTaskInput]:
+        if not value:
+            raise ValueError("missed_tasks cannot be empty for adaptive plan re-allocation")
+        return value
+
+    def get_high_priority_missed_tasks(self) -> List[MissedTaskInput]:
+        """Returns only the high-priority missed tasks requiring mandatory recovery."""
+        return [t for t in self.missed_tasks if t.priority == "high"]
+
+    def get_remaining_days(self) -> List[DayName]:
+        """Returns the list of remaining days in the schedule from current_day onward."""
+        if self.current_day not in DAY_ORDER:
+            return DAY_ORDER
+        current_idx = DAY_ORDER.index(self.current_day)
+        return DAY_ORDER[current_idx:]
+
+
+
 
 STUDY_PLAN_SYSTEM_INSTRUCTION = """
 You are an expert AI Academic Coach and Study Planner.
@@ -525,6 +596,146 @@ CRITICAL REQUIREMENTS:
 - Respond ONLY with valid, raw JSON matching the required schema.
 """
     return prompt.strip()
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Plan System Instruction & Dynamic Re-Allocation Prompt Builder
+# ---------------------------------------------------------------------------
+
+ADAPTIVE_PLAN_SYSTEM_INSTRUCTION = """
+You are an expert AI Academic Coach and Study Planner specializing in dynamic adaptive learning and schedule re-balancing.
+Your task is to re-allocate missed study sessions—with absolute top priority given to missed HIGH-PRIORITY subjects—into the remaining available days of an active 7-day study plan without causing student burnout or exceeding daily study hour limits.
+
+CRITICAL INSTRUCTIONS & INVARIANTS:
+1. OUTPUT FORMAT: Respond ONLY with a valid, raw JSON object adhering strictly to the JSON schema specified below.
+2. DO NOT include markdown code fences (```json or ```), preamble, or postscript text.
+3. MANDATORY HIGH-PRIORITY RECOVERY:
+   - Every missed task with priority="high" MUST be successfully rescheduled into upcoming available days.
+   - Rescheduled sessions must be designated with high priority and an appropriate focused activity type ('core_concept_study', 'revision_quiz', or 'practice_problems').
+   - Prefix the rescheduled topic with "Catch-up: " or "Mastery Catch-up: " to make recovery transparent to the student.
+4. FORWARD-ONLY ALLOCATION (NO PAST MODIFICATIONS):
+   - Only modify sessions for the current day (`current_day`) and subsequent upcoming days.
+   - Days that occurred prior to `current_day` represent historical records and MUST NOT be populated with new catch-up sessions.
+5. STRICT DAILY STUDY HOURS CEILING (NO STUDENT BURNOUT):
+   - The total study hours (`total_hours`) for any day MUST NOT exceed the student's daily study hours limit (`daily_hours_limit` or `daily_target_hours`).
+   - If adding catch-up sessions threatens to exceed daily capacity, you MUST intelligently swap, compress, or postpone existing 'low' or 'medium' priority sessions (such as generic reviews or optional problem sets).
+   - Recalculate each modified day's `total_hours` to equal the exact sum of its sessions' `duration_hours`.
+6. COGNITIVE LOAD BALANCING & SPACED REPETITION:
+   - Distribute multiple missed sessions across different upcoming days with the lowest existing load.
+   - Do NOT stack more than 2 consecutive hours of the same demanding technical subject in a single session.
+7. SUBJECT FIDELITY & ZERO HALLUCINATION:
+   - In `weekly_schedule`, session `subject` fields MUST preserve the EXACT subject name strings from the active plan or input profile (e.g., 'Operating Systems', 'C++', 'AI/ML', 'BI-402').
+   - DO NOT invent, abbreviate, or alter subject names.
+8. CHRONOLOGICAL ORDERING & CONFLICT-FREE TIMINGS:
+   - Days must remain in strict chronological order (Monday through Sunday).
+   - Within each day, sessions must have valid, non-overlapping `start_time` and `end_time` strings in 24-hour HH:MM format (e.g., "09:00", "11:00").
+9. OPTIMIZED SEARCH KEYWORDS FOR TARGETED RECOMMENDATIONS:
+   - The `search_keywords` array MUST be updated to prominently feature the missed high-priority subjects and topics (e.g., "Operating Systems Process Synchronization Semaphores", "Computer Networks TCP Flow Control") so the recommendation pipeline can immediately surface relevant Coursera video modules and refresher courses.
+10. EXPLICIT STRATEGY SUMMARY:
+   - Update `strategy_summary` in `plan_overview` to clearly articulate how the schedule was adapted (e.g., "Re-allocated 1.5h missed Operating Systems Process Synchronization to Friday by compressing low-priority practice, maintaining 4.0h daily limit").
+
+JSON SCHEMA SPECIFICATION:
+{
+  "plan_overview": {
+    "student_semester": number,
+    "daily_target_hours": number,
+    "weekly_total_hours": number,
+    "primary_focus": string,
+    "strategy_summary": string
+  },
+  "weekly_schedule": [
+    {
+      "day": "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday",
+      "total_hours": number,
+      "sessions": [
+        {
+          "subject": string,
+          "topic": string,
+          "duration_hours": number,
+          "activity_type": "core_concept_study" | "practice_problems" | "lecture_review" | "revision_quiz",
+          "priority": "high" | "medium" | "low",
+          "start_time": string,
+          "end_time": string
+        }
+      ]
+    }
+  ],
+  "monthly_milestones": [
+    {
+      "week": number,
+      "milestone": string,
+      "key_deliverable": string
+    }
+  ],
+  "study_tips": [string],
+  "search_keywords": [string]
+}
+"""
+
+
+def build_adaptive_plan_prompt(data: AdaptivePlanInput) -> str:
+    """
+    Constructs the deterministic user prompt for adaptive schedule re-allocation,
+    providing the active plan, missed high-priority tasks, available remaining days,
+    and daily study hour constraints.
+    """
+    plan_json = json.dumps(data.current_plan.model_dump(), indent=2)
+
+    remaining_days = data.get_remaining_days()
+    remaining_days_str = ", ".join(remaining_days)
+
+    limit = (
+        data.daily_hours_limit
+        or (data.onboarding_data.study_hours_per_day if data.onboarding_data else None)
+        or data.current_plan.plan_overview.daily_target_hours
+    )
+
+    missed_tasks_formatted = []
+    for t in data.missed_tasks:
+        missed_tasks_formatted.append(
+            f"- [{t.priority.upper()}] Subject: '{t.subject}' | Topic: '{t.topic}' | "
+            f"Missed on: {t.missed_day} | Deficit: {t.deficit_hours}h (Planned {t.planned_duration_hours}h, "
+            f"Studied {t.actual_minutes_studied}m) | Reason: {t.reason or 'Missed session'}"
+        )
+    missed_tasks_str = "\n".join(missed_tasks_formatted)
+
+    onboarding_str = ""
+    if data.onboarding_data:
+        subjects_formatted = json.dumps([s.model_dump() for s in data.onboarding_data.subjects], indent=2)
+        onboarding_str = f"""
+Student Onboarding Profile Constraints:
+- Semester: {data.onboarding_data.semester}
+- Enrolled Subjects & Target Scores:
+{subjects_formatted}
+"""
+
+    prompt = f"""
+Active 7-Day Study Plan:
+{plan_json}
+{onboarding_str}
+Current Day: {data.current_day}
+Available Remaining Days for Re-allocation: [{remaining_days_str}]
+Strict Daily Available Study Hours Limit: {limit} hours/day
+
+Missed Study Tasks Requiring Dynamic Re-allocation:
+{missed_tasks_str}
+
+Adaptation Goal:
+"{data.adaptation_goal}"
+
+CRITICAL INSTRUCTIONS FOR ADAPTIVE RE-ALLOCATION:
+1. Re-allocate all missed HIGH-PRIORITY subjects into remaining days [{remaining_days_str}].
+2. Do NOT add catch-up sessions to days before {data.current_day}.
+3. The sum of session durations on ANY day must not exceed {limit} hours. If needed, compress or defer existing 'low' or 'medium' priority sessions.
+4. Update `total_hours` for each affected day and `weekly_total_hours` in `plan_overview`.
+5. Preserve EXACT subject name strings (zero hallucination).
+6. Ensure all sessions have non-overlapping 24h start_time and end_time.
+7. Include 3 to 8 targeted `search_keywords` combining the missed high-priority subjects with their core technical skills.
+8. Update `strategy_summary` to describe how missed sessions were re-allocated.
+9. Return ONLY valid, raw JSON adhering strictly to the schema.
+"""
+    return prompt.strip()
+
 
 
 
