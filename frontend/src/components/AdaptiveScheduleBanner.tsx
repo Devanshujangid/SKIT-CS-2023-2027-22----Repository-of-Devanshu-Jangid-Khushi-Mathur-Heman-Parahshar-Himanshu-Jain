@@ -41,6 +41,13 @@ export default function AdaptiveScheduleBanner({
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
 
+  // Automatically un-dismiss banner if missed tasks change or count increases
+  React.useEffect(() => {
+    if (missedCount > 0) {
+      setIsDismissed(false);
+    }
+  }, [missedCount, missedTasks]);
+
   if (isDismissed || missedCount <= 0) return null;
 
   const subjectText =
