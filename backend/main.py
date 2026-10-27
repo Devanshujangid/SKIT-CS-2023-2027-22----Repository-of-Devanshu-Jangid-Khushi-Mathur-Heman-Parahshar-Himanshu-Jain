@@ -21,6 +21,7 @@ from routes.plans import router as plans_router
 from routes import export
 from routes.tasks import router as tasks_router
 from routes.recommendations import router as recommendations_router
+from routes.resources import router as resources_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ app.include_router(plans_router)
 app.include_router(export.router)
 app.include_router(tasks_router)
 app.include_router(recommendations_router)
+app.include_router(resources_router)
 
 
 # ============================================================

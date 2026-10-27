@@ -139,7 +139,7 @@ export default function FocusWeakTopicsWidget({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {weakTopics.map((item) => {
+          {weakTopics.map((item, index) => {
             const isNeedsRevision = item.status === "Needs Revision";
             const planned = item.planned_minutes ?? 0;
             const actual = item.actual_minutes ?? 0;
@@ -152,7 +152,7 @@ export default function FocusWeakTopicsWidget({
 
             return (
               <div
-                key={item.id}
+                key={`${item.id}-${index}`}
                 className={`flex flex-col justify-between rounded-xl p-5 border transition-all ${
                   isNeedsRevision
                     ? "bg-gradient-to-br from-rose-50/40 via-white to-amber-50/25 border-rose-200 hover:border-rose-300 hover:shadow-xs"

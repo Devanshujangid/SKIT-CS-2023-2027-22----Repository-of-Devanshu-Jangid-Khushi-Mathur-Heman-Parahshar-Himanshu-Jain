@@ -41,47 +41,71 @@ tfidf_matrix = tfidf.fit_transform(df["combined_features"])
 
 
 
+
 def recommend_courses(query, top_n=5):
     """Recommend courses based on keyword similarity."""
 
     if not isinstance(query, str) or not query.strip():
         return []
 
-    if top_n < 1:
+    if not isinstance(top_n, int) or not 1 <= top_n <= 5:
         return []
 
-    # Convert the user's query into a TF-IDF vector.
+    analyzer = tfidf.build_analyzer()
+    query_terms = set(analyzer(query.strip()))
+
+    if not query_terms:
+        return []
+
     query_vector = tfidf.transform([query.strip()])
 
-    # Compare the query against all course vectors.
     similarity_scores = cosine_similarity(
         query_vector,
         tfidf_matrix
     ).flatten()
 
-    # Sort courses from most relevant to least relevant.
-    ranked_indices = similarity_scores.argsort()[::-1]
+    course_terms = [
+        set(analyzer(text))
+        for text in df["combined_features"]
+    ]
 
+    overlap_scores = [
+        len(query_terms & terms) / len(query_terms)
+        for terms in course_terms
+    ]
+
+    ranked_indices = similarity_scores.argsort()[::-1]
     recommendations = []
 
     for index in ranked_indices:
         score = float(similarity_scores[index])
 
-        # Skip courses that have no textual match.
-        # Skip courses with very low textual similarity.
+        if overlap_scores[index] == 0:
+            continue
+
         if score < 0.10:
-          continue
+            break
 
         course = df.iloc[index]
 
         recommendations.append({
-            "course_name": course["Course Name"],
-            "university": course["University"],
-            "difficulty": course["Difficulty Level"],
-            "rating": course["Course Rating"],
-            "url": course["Course URL"],
-            "description": course["Course Description"],
-            "skills": course["Skills"],
+            "course_name": str(course["Course Name"]),
+            "university": (
+                None if pd.isna(course["University"])
+                else str(course["University"])
+            ),
+            "difficulty_level": (
+                None if pd.isna(course["Difficulty Level"])
+                else str(course["Difficulty Level"])
+            ),
+            "course_rating": (
+                None if pd.isna(course["Course Rating"])
+                else float(course["Course Rating"])
+            ),
+            "course_url": (
+                None if pd.isna(course["Course URL"])
+                else str(course["Course URL"])
+            ),
             "similarity_score": round(score, 4),
         })
 
@@ -89,6 +113,7 @@ def recommend_courses(query, top_n=5):
             break
 
     return recommendations
+
 
 
 
