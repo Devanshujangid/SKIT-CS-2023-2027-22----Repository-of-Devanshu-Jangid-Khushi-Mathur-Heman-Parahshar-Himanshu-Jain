@@ -252,19 +252,38 @@ async def get_adaptive_status(
         affected_subjects = sorted(list(set(t["subject"] for t in missed_tasks)))
         total_missed_mins = sum(t["missed_minutes"] for t in missed_tasks)
 
+        schedule_reeval_flag = bool(plan_data.get("schedule_reevaluation_required") or plan_data.get("requires_rebalance"))
+        needs_rebalance = len(missed_tasks) > 0 or schedule_reeval_flag
+        reeval_audit = plan_data.get("reevaluation_audit") or {}
+        reeval_msg = reeval_audit.get("message")
+
+        if missed_tasks and schedule_reeval_flag and reeval_msg:
+            summary = (
+                f"Detected {len(missed_tasks)} missed task(s) totaling {total_missed_mins} mins "
+                f"in {', '.join(affected_subjects)}. In addition: {reeval_msg}"
+            )
+        elif missed_tasks:
+            summary = (
+                f"Detected {len(missed_tasks)} missed task(s) totaling {total_missed_mins} mins "
+                f"in {', '.join(affected_subjects)} from previous days."
+            )
+        elif schedule_reeval_flag and reeval_msg:
+            summary = reeval_msg
+        elif schedule_reeval_flag:
+            summary = "Daily study hours update requires schedule re-evaluation."
+        else:
+            summary = "All scheduled study sessions on track."
+
         return {
             "success": True,
-            "needs_rebalance": len(missed_tasks) > 0,
+            "needs_rebalance": needs_rebalance,
             "missed_task_count": len(missed_tasks),
             "missed_minutes": total_missed_mins,
             "affected_subjects": affected_subjects,
             "missed_tasks": missed_tasks,
-            "summary": (
-                f"Detected {len(missed_tasks)} missed task(s) totaling {total_missed_mins} mins "
-                f"in {', '.join(affected_subjects)} from previous days."
-                if missed_tasks
-                else "All scheduled study sessions on track."
-            ),
+            "schedule_reevaluation_required": schedule_reeval_flag,
+            "reevaluation_audit": reeval_audit if schedule_reeval_flag else None,
+            "summary": summary,
         }
 
     except HTTPException:

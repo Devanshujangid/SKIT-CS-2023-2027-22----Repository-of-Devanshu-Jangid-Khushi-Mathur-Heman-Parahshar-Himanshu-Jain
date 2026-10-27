@@ -159,33 +159,22 @@ async def create_or_update_profile(
 
         internal_user_id = user_res.data[0]["id"]
 
-        # Create or update the student's profile.
-        profile_res = (
-            db.table("student_profiles")
-            .upsert(
-                {
-                    "user_id": internal_user_id,
-                    "semester": payload.semester,
-                    "study_hours_per_day": payload.study_hours_per_day,
-                    "goals": goals_list,
-                    "subjects": subjects_list,
-                    "onboarding_completed": True
-                },
-                on_conflict="user_id"
-            )
-            .execute()
-        )
+        from services.profile_service import update_student_profile_with_reevaluation
 
-        if not profile_res.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save student profile"
-            )
+        result = update_student_profile_with_reevaluation(
+            db=db,
+            user_id=internal_user_id,
+            new_study_hours=payload.study_hours_per_day,
+            semester=payload.semester,
+            goals=goals_list,
+            subjects=subjects_list,
+        )
 
         return {
             "success": True,
             "message": "Profile saved successfully",
-            "data": profile_res.data[0]
+            "data": result["profile"],
+            "schedule_reevaluation": result.get("schedule_reevaluation"),
         }
 
     except HTTPException:
