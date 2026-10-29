@@ -483,3 +483,248 @@ The implementation is ready to be committed and pushed.
 30. Planned authentication tests for requests with missing, invalid, expired, and valid tokens.
 31. Planned database verification for the new subjects column and tasks table.
 32. Prepared the changes for version control and submission through a pull request.
+
+
+## Task – Database Schema Freeze & FastAPI Staging Deployment
+
+### Work Explanation (200 Detailed Implementation Points)
+
+1. Worked on the Smart Learning Planner backend and database architecture milestone.
+2. Focused on executing a complete codebase freeze on the database schema.
+3. Focused on validating and preparing the FastAPI backend for staging deployment.
+4. Reviewed the active codebase to establish an authoritative database schema baseline.
+5. Identified existing schema definitions across `backend/schema.sql` and migration scripts.
+6. Analyzed the adaptive plan versioning migration in `backend/migration/adaptive_plan_versions.sql`.
+7. Detected schema inconsistency where `backend/schema.sql` still enforced `unique_user_study_plan`.
+8. Identified that `unique_user_study_plan` restricted students to exactly one study plan record.
+9. Recognized that this legacy constraint prevented immutable adaptive plan versioning.
+10. Removed the obsolete `CONSTRAINT unique_user_study_plan UNIQUE (user_id)` from `study_plans`.
+11. Added migration command `ALTER TABLE public.study_plans DROP CONSTRAINT IF EXISTS unique_user_study_plan;`.
+12. Designed the partial unique index `idx_study_plans_one_active_per_user` on `study_plans`.
+13. Defined the index condition `ON public.study_plans (user_id) WHERE is_active = TRUE;`.
+14. Ensured that at most one study plan remains active per student at any given time.
+15. Enabled storage of multiple immutable historical study plans per student user.
+16. Preserved audit history of all previous plan schedules and re-balancing events.
+17. Integrated the atomic PostgreSQL stored procedure `public.create_study_plan_version()`.
+18. Configured transactional advisory locks using `PERFORM pg_advisory_xact_lock(...)`.
+19. Derived the advisory lock key from `hashtextextended(p_user_id::TEXT, 0)`.
+20. Serialized concurrent plan generation and adaptive re-balancing requests per user.
+21. Inserted newly generated study plans with `is_active = FALSE` initially.
+22. Deactivated the student's previous active study plan by setting `is_active = FALSE`.
+23. Updated the `updated_at = NOW()` timestamp on the deactivated plan version.
+24. Activated the newly inserted study plan by setting `is_active = TRUE`.
+25. Updated the `updated_at = NOW()` timestamp on the newly activated plan version.
+26. Returned the activated study plan record as a setof `public.study_plans`.
+27. Consolidated the entire stored procedure directly into `backend/schema.sql`.
+28. Established formal Schema Version `1.2.0-FROZEN` in `backend/schema.sql`.
+29. Recorded the baseline Git Commit SHA `80e6f0239e24ea5832c32942398cdd3af8e72e10` in the schema header.
+30. Aligned the frozen schema with the Mid-Term 50% Architecture Evaluation milestone.
+31. Declared an explicit schema freeze policy forbidding ad-hoc DDL changes without formal approval.
+32. Reviewed the `users` table schema in `backend/schema.sql`.
+33. Verified UUID primary key generation using `gen_random_uuid()`.
+34. Maintained the `clerk_id TEXT UNIQUE NOT NULL` column for user authentication.
+35. Verified the student `email TEXT NOT NULL` column.
+36. Verified the default user role `role TEXT DEFAULT 'student'`.
+37. Verified the creation timestamp `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`.
+38. Reviewed the `student_profiles` table schema in `backend/schema.sql`.
+39. Verified foreign-key relationship referencing `users(id)` with `ON DELETE CASCADE`.
+40. Verified the unique constraint on `student_profiles.user_id` ensuring one profile per student.
+41. Checked academic profile parameters: `semester INT NOT NULL`.
+42. Checked daily study availability parameter: `study_hours_per_day FLOAT NOT NULL`.
+43. Checked student academic goals parameter: `goals TEXT[] NOT NULL`.
+44. Checked curriculum subjects parameter: `subjects TEXT[] NOT NULL DEFAULT '{}'`.
+45. Maintained migration statement `ALTER TABLE public.student_profiles ADD COLUMN IF NOT EXISTS subjects...`.
+46. Checked onboarding completion status: `onboarding_completed BOOLEAN DEFAULT TRUE`.
+47. Reviewed the `study_plans` table schema in `backend/schema.sql`.
+48. Verified foreign-key relationship referencing `users(id)` with `ON DELETE CASCADE`.
+49. Stored structured weekly schedules using the PostgreSQL `JSONB` data type.
+50. Maintained timestamp metadata columns: `created_at` and `updated_at`.
+51. Maintained active status indicator: `is_active BOOLEAN NOT NULL DEFAULT TRUE`.
+52. Created composite query index `idx_study_plans_user_active_created`.
+53. Indexed `(user_id, is_active, created_at DESC)` for high-performance dashboard loading.
+54. Reviewed the `tasks` table schema in `backend/schema.sql`.
+55. Verified foreign-key relationship referencing `users(id)` with `ON DELETE CASCADE`.
+56. Maintained task information fields: `title TEXT NOT NULL` and `description TEXT`.
+57. Maintained scheduled date tracking: `scheduled_date DATE`.
+58. Maintained plan session link key: `plan_session_key TEXT`.
+59. Maintained completion tracking: `is_completed BOOLEAN NOT NULL DEFAULT FALSE`.
+60. Maintained completion timestamp: `completed_at TIMESTAMPTZ`.
+61. Maintained task lifecycle timestamps: `created_at` and `updated_at`.
+62. Created query index `idx_tasks_user_created` on `(user_id, created_at DESC)`.
+63. Created query index `idx_tasks_user_scheduled` on `(user_id, scheduled_date)`.
+64. Formulated the Row Level Security (RLS) enforcement architecture.
+65. Enabled Row Level Security on the `users` table via `ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;`.
+66. Created RLS SELECT policy on `users` matching `clerk_id = (SELECT auth.jwt() ->> 'sub')`.
+67. Enabled Row Level Security on the `student_profiles` table.
+68. Created RLS SELECT policy on `student_profiles` checking user ownership via Clerk identity.
+69. Created RLS INSERT policy on `student_profiles` with `WITH CHECK` ownership validation.
+70. Created RLS UPDATE policy on `student_profiles` with `USING` and `WITH CHECK` ownership validation.
+71. Enabled Row Level Security on the `study_plans` table.
+72. Created RLS SELECT policy on `study_plans` restricting students to their own study plans.
+73. Created RLS INSERT policy on `study_plans` with `WITH CHECK` ownership validation.
+74. Created RLS UPDATE policy on `study_plans` with `USING` and `WITH CHECK` ownership validation.
+75. Enabled Row Level Security on the `tasks` table.
+76. Created RLS SELECT policy on `tasks` restricting students to their own scheduled tasks.
+77. Created RLS INSERT policy on `tasks` with `WITH CHECK` ownership validation.
+78. Created RLS UPDATE policy on `tasks` with `USING` and `WITH CHECK` ownership validation.
+79. Created RLS DELETE policy on `tasks` allowing students to delete only their own tasks.
+80. Verified relational integrity across all database tables.
+81. Confirmed that deleting a user record cascades deletions to student profiles.
+82. Confirmed that deleting a user record cascades deletions to study plans and tasks.
+83. Reviewed database connectivity implementation in `backend/database.py`.
+84. Loaded environment variables from `backend/.env` using `python-dotenv`.
+85. Parsed `SUPABASE_URL` and validated HTTP/HTTPS protocol prefixes.
+86. Parsed `SUPABASE_SERVICE_ROLE_KEY` for backend administrative operations.
+87. Maintained fallback to `SUPABASE_KEY` if service-role key alias is provided.
+88. Initialized the Supabase client instance using `create_client()`.
+89. Provided clear warning logs when Supabase credentials are missing or invalid.
+90. Implemented the `get_db()` client accessor with descriptive runtime error handling.
+91. Implemented `get_or_create_user()` helper mapping Clerk credentials to internal user IDs.
+92. Queried the `users` table by `clerk_id` using `.limit(1)` for optimal retrieval.
+93. Inserted new user records automatically if no matching Clerk identity was found.
+94. Returned internal UUID string representations for subsequent relational database queries.
+95. Implemented `upsert_study_plan()` utilizing the PostgreSQL `create_study_plan_version` RPC.
+96. Passed `p_user_id` and `p_plan_data` as RPC parameters in atomic execution.
+97. Handled list and dictionary return payloads from the Supabase RPC client.
+98. Added logging for created study-plan versions and internal student IDs.
+99. Preserved backward compatibility by aliasing `save_study_plan = upsert_study_plan`.
+100. Implemented `save_plan_tasks()` helper for synchronizing study sessions into tasks.
+101. Handled Monday date computation using `Asia/Kolkata` timezone (`ZoneInfo`).
+102. Generated deterministic session keys containing the active study plan ID.
+103. Prevented session key collision between distinct study plan versions.
+104. Checked existing task records before inserting new session tasks.
+105. Wrapped task synchronization in try-except blocks to prevent study plan rollback on task error.
+106. Reviewed Clerk authentication verification in `backend/auth.py`.
+107. Confirmed complete elimination of unauthenticated mock user fallbacks (`dev_user_default`).
+108. Extracted Bearer authorization tokens from request headers.
+109. Enforced HTTP 401 Unauthorized errors when the Bearer token is missing.
+110. Enforced HTTP 401 Unauthorized errors when the Authorization header format is malformed.
+111. Fetched Clerk JWKS public keys from the designated issuer URL endpoint.
+112. Implemented JWKS key caching to minimize latency on repeated API requests.
+113. Verified JWT cryptographic RS256 signatures against Clerk public keys.
+114. Validated token issuer claims against configured `CLERK_ISSUER_URL`.
+115. Validated token expiration timestamps (`exp`) and standard claims.
+116. Extracted and returned the verified user payload containing Clerk ID (`sub`) and `email`.
+117. Reviewed application initialization in `backend/main.py`.
+118. Configured FastAPI CORS middleware with allowed origins from `CORS_ORIGINS`.
+119. Allowed credentials, unrestricted HTTP methods, and custom headers.
+120. Registered the AI planning router (`routes/ai.py`).
+121. Registered the study plans router (`routes/plans.py`).
+122. Registered the task tracking router (`routes/tasks.py`).
+123. Registered the course recommendations router (`routes/recommendations.py`).
+124. Registered the manual resource discovery router (`routes/resources.py`).
+125. Registered the calendar export router (`routes/export.py`).
+126. Validated the public health check endpoint `GET /api/health`.
+127. Ensured `/api/health` returns HTTP 200 with service metadata without requiring authentication.
+128. Validated the protected route `GET /api/v1/protected-route` requiring valid Bearer tokens.
+129. Validated the student profile creation endpoint `POST /api/v1/profile`.
+130. Validated request payload structure using Pydantic `ProfileCreateRequest`.
+131. Validated profile input fields: `semester`, `study_hours_per_day`, `goals`, `subjects`.
+132. Reviewed the AI study plan generation route `POST /api/v1/ai/generate-plan`.
+133. Integrated deterministic system instructions bounding Google Gemini AI output.
+134. Validated generated schedule structure using Pydantic `StudyPlanOutputSchema`.
+135. Enforced 7-day schedule format, chronological ordering, and daily study hour ceilings.
+136. Stored generated study plans through `save_study_plan()` and generated initial tasks.
+137. Reviewed the adaptive schedule re-balancing route `POST /api/v1/ai/adapt-plan`.
+138. Ingested active study plans, missed task telemetry, and current day index.
+139. Validated adaptive plan inputs using Pydantic `AdaptivePlanInput`.
+140. Enforced the 10 invariants of `ADAPTIVE_PLAN_SYSTEM_INSTRUCTION`.
+141. Required all high-priority missed sessions to be rescheduled with "Catch-up: " prefix.
+142. Enforced forward-only allocation of catch-up sessions to remaining future days.
+143. Enforced daily study hour limits ($\sum \text{duration\_hours} \le \text{daily\_hours\_limit}$).
+144. Persisted re-balanced schedules as new active plan versions via atomic stored procedure.
+145. Reviewed study-plan retrieval endpoint `GET /api/v1/plans`.
+146. Filtered study plans by user ID and `is_active = True`.
+147. Included all required metadata in API response: `id`, `plan_data`, `created_at`, `updated_at`, `is_active`.
+148. Ensured plan timestamps are available to the frontend for export file formatting.
+149. Reviewed deterministic weak topic detection endpoint `GET /api/v1/plans/weak-topics`.
+150. Evaluated task executions and study plan data using `WeakTopicsService`.
+151. Evaluated Rule 1: Explicitly missed sessions criterion.
+152. Evaluated Rule 2: Sub-50% study duration criterion ($\rho < 0.50$ and deficit $\ge 15\text{m}$).
+153. Evaluated Rule 3: Quantifiable deficit thresholding for severity classification.
+154. Evaluated Rule 4: High-priority exam target alignment.
+155. Evaluated Rule 5: Future session telemetry protection guardrail.
+156. Generated explainability tags and recommended search queries with zero LLM hallucination.
+157. Reviewed course recommendation endpoint `GET /api/v1/recommendations`.
+158. Vectorized incoming queries using fitted `TfidfVectorizer(max_features=5000)`.
+159. Computed cosine similarity across 3,522 verified Coursera courses.
+160. Applied cosine similarity cutoff threshold ($\ge 0.10$) to eliminate phantom recommendations.
+161. Reviewed task execution telemetry endpoint `PATCH /api/v1/tasks/{id}/execution`.
+162. Logged student actual study minutes and task status (`completed`, `partially_completed`, `missed`).
+163. Updated task execution snapshots for deterministic diagnostic evaluation.
+164. Reviewed automated unit and integration tests in `backend/tests/`.
+165. Inspected `test_weak_topics.py` validating all deterministic diagnostic formulas.
+166. Inspected `test_study_plan_prompt.py` validating prompt schema invariants and day bounds.
+167. Inspected `run_prompt_isolation_tests.py` validating obscure syllabus inputs.
+168. Inspected `test_settings_schemas.py` and `test_profile_update_isolation.py`.
+169. Inspected `test_e2e_flow.py` executing the complete 5-step learning loop lifecycle.
+170. Validated Step 1: Active plan verification.
+171. Validated Step 2: Session execution telemetry marking task as missed.
+172. Validated Step 3: Deterministic weak topic flagging with explainability badges.
+173. Validated Step 4: Targeted Coursera course recommendations via TF-IDF vector space.
+174. Validated Step 5: Adaptive schedule re-balance with high-priority recovery.
+175. Executed the complete test suite using `python -m unittest discover tests`.
+176. Confirmed that all 77 automated tests executed successfully.
+177. Confirmed a 100% test pass rate (77 passed, 0 failed, 0 errors).
+178. Recorded test execution duration of 1.64 seconds.
+179. Inspected OpenAPI endpoint schema generation across all registered FastAPI routes.
+180. Confirmed that all 19 OpenAPI routes compiled cleanly without schema errors.
+181. Tested `/api/health` endpoint using FastAPI `TestClient`.
+182. Verified that `/api/health` returned HTTP 200 OK with `{"status": "ok", "service": "Smart Learning Planner Backend"}`.
+183. Tested protected endpoints without Bearer token confirming HTTP 401 Unauthorized responses.
+184. Reviewed environment variable template in `backend/.env.example`.
+185. Documented `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` requirements.
+186. Documented `CLERK_ISSUER_URL` and `CLERK_SECRET_KEY` requirements.
+187. Documented `GEMINI_API_KEY`, `PORT`, and `CORS_ORIGINS` requirements.
+188. Verified that `backend/.env` is ignored by Git to prevent secret exposure.
+189. Configured staging deployment commands for production ASGI server execution.
+190. Defined staging execution command: `uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2`.
+191. Prepared Postman smoke test checklist for staging verification.
+192. Planned unauthenticated health check test case (`GET /api/health`).
+193. Planned missing authorization header test case (`GET /api/v1/protected-route`).
+194. Planned malformed token test case (`Authorization: Bearer invalid_token`).
+195. Planned expired token test case verifying HTTP 401 responses.
+196. Planned authenticated study plan retrieval test case (`GET /api/v1/plans`).
+197. Planned deterministic diagnostic test case (`GET /api/v1/plans/weak-topics`).
+198. Planned adaptive schedule re-balancing test case (`POST /api/v1/ai/adapt-plan`).
+199. Documented database schema freeze baseline v1.2.0 in `workLog.md`.
+200. Verified that all 7 concrete completion criteria were satisfied and ready for staging deployment.
+
+### Concrete Completion Criteria Verification
+
+| Criterion | Requirement | Status | Evidence / Verification |
+| :--- | :--- | :---: | :--- |
+| **1. Baseline Documentation** | Schema baseline documented against Git commit SHA | **PASSED** | Locked to commit `80e6f0239e24ea5832c32942398cdd3af8e72e10` in `backend/schema.sql` header |
+| **2. Zero Unapproved Changes** | Consolidated migration baseline with no pending unapproved DDL | **PASSED** | Integrated `adaptive_plan_versions.sql`, dropped legacy constraints, added atomic RPC |
+| **3. Automated Test Rigor** | FastAPI syntax & unit tests execute with 100% success rate | **PASSED** | Ran `unittest discover tests`: **77 / 77 Tests Passed (100%)** |
+| **4. Staging Deployment Readiness** | Backend service verified for staging rollout | **PASSED** | Uvicorn/FastAPI startup verified; all 19 OpenAPI routes registered cleanly |
+| **5. Health & Endpoint Smoke Tests** | Health endpoint and critical routes validated | **PASSED** | `GET /api/health` returned HTTP 200 OK (`status: ok`) |
+| **6. Environment Security** | Variables & DB connection verified without leaking secrets | **PASSED** | Validated against `.env.example`; service-role key protected in `.env` |
+| **7. Evidence & Documentation** | Complete deployment report and audit trail recorded | **PASSED** | Full architecture report and work log updated |
+
+
+## Task – Analytics Aggregations & Role-Based Access Control (RBAC)
+
+### Work Done
+
+1. Designed SQL aggregation queries in Supabase PostgreSQL to group actual study minutes by subject, weekly performance, and task completion rates.
+2. Created database migration `backend/migration/analytics_aggregations.sql` containing stored procedures `get_subject_study_minutes()`, `get_weekly_performance_by_day()`, and `get_student_study_analytics()`.
+3. Extracted and normalized curriculum subjects from task titles using `SPLIT_PART(t.title, ':', 1)`.
+4. Computed planned study minutes versus actual completed study minutes per subject, calculating subject mastery adherence percentages.
+5. Computed day-by-day weekly performance (Monday through Sunday) with ISO day-of-week indexing (`EXTRACT(ISODOW FROM scheduled_date)`), tracking scheduled hours, actual hours, deficits, and completion rates.
+6. Aggregated global task telemetry, evaluating total tasks, completed tasks, missed tasks (scheduled date prior to current date), and overall task completion percentage.
+7. Designed and implemented Role-Based Access Control (RBAC) middleware in `backend/auth.py` via `require_role()`.
+8. Enforced strict role separation between `'admin'` and `'student'` roles.
+9. Implemented fallback role resolution: checks Clerk JWT `public_metadata` claims first, falling back to Supabase `users.role` table lookup.
+10. Added named convenience dependencies `require_student` (allowing 'student' and 'admin') and `require_admin` (strictly restricted to 'admin').
+11. Built `GET /api/v1/analytics/summary` endpoint in `backend/routes/analytics.py` feeding the Module 8 Academic Analytics dashboard.
+12. Built `GET /api/v1/analytics/admin/roster` endpoint in `backend/routes/analytics.py` for administrative roster monitoring.
+13. Enforced HTTP 403 Forbidden responses when student accounts attempt to access admin-only endpoints.
+14. Registered the analytics router in `backend/main.py`.
+15. Created comprehensive automated unit tests in `backend/tests/test_analytics_and_roles.py`.
+16. Validated RBAC token inspection, 403 authorization rejections, 200 admin permissions, and analytics aggregation formulas.
+17. Ran full test suite with all 85 unit tests passing (100% success rate in 0.21s).
+
+
+
+
