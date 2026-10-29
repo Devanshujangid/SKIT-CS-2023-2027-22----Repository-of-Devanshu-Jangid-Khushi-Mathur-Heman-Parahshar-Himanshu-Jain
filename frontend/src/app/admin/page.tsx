@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { API_BASE_URL } from "@/lib/api";
 import {
   Users,
   BookOpen,
@@ -20,6 +21,7 @@ import {
   Activity,
   Layers,
   ShieldCheck,
+  Wifi,
 } from "lucide-react";
 
 // Student Roster Mock Data
@@ -122,6 +124,41 @@ export default function AdminOverviewPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
 
+  // Live health and system telemetry states
+  const [backendHealth, setBackendHealth] = useState<{ status: string; latencyMs: number } | null>(null);
+  const [adminSummary, setAdminSummary] = useState<{ enrolled_students: number; active_plans: number; status: string } | null>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState(false);
+
+  const fetchHealthAndSummary = useCallback(async () => {
+    setIsLoadingHealth(true);
+    const start = performance.now();
+    try {
+      const healthRes = await fetch(`${API_BASE_URL}/api/health`, { cache: "no-store" });
+      const latency = Math.round(performance.now() - start);
+
+      if (healthRes.ok) {
+        setBackendHealth({ status: "ok", latencyMs: latency });
+      } else {
+        setBackendHealth({ status: "degraded", latencyMs: latency });
+      }
+
+      // Fetch admin stats summary
+      const summaryRes = await fetch(`${API_BASE_URL}/api/v1/admin/summary`, { cache: "no-store" });
+      if (summaryRes.ok) {
+        const sumJson = await summaryRes.json();
+        setAdminSummary(sumJson);
+      }
+    } catch {
+      setBackendHealth({ status: "standby", latencyMs: 0 });
+    } finally {
+      setIsLoadingHealth(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHealthAndSummary();
+  }, [fetchHealthAndSummary]);
+
   const filteredStudents = STUDENT_ROSTER.filter((s) => {
     const matchesSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -136,15 +173,28 @@ export default function AdminOverviewPage() {
     return matchesSearch;
   });
 
+  const enrolledCount = adminSummary?.enrolled_students ?? 128;
+  const activePlansCount = adminSummary?.active_plans ?? 114;
+
   return (
     <div className="space-y-6">
       
       {/* Admin Hero Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-3xl bg-slate-950 border border-slate-800 p-6 sm:p-8 shadow-md">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-400">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>SKIT Department of Computer Science & Engineering</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-400">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>SKIT Department of Computer Science & Engineering</span>
+            </div>
+            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              backendHealth?.status === "ok" 
+                ? "bg-emerald-950/80 text-emerald-400 border-emerald-800" 
+                : "bg-amber-950/80 text-amber-400 border-amber-800"
+            }`}>
+              <span className={`h-2 w-2 rounded-full ${backendHealth?.status === "ok" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`}></span>
+              {backendHealth?.status === "ok" ? `FastAPI Live (${backendHealth.latencyMs}ms)` : "Backend Standby Mode"}
+            </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
             Academic Supervisor & Platform Admin Console
@@ -156,6 +206,14 @@ export default function AdminOverviewPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={fetchHealthAndSummary}
+            disabled={isLoadingHealth}
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-indigo-400 ${isLoadingHealth ? "animate-spin" : ""}`} />
+            <span>{isLoadingHealth ? "Checking..." : "Refresh Health"}</span>
+          </button>
           <Link
             href="/OCT_31_50_PERCENT_CHECKPOINT_ARCHITECTURE_REPORT.md"
             target="_blank"
@@ -185,7 +243,7 @@ export default function AdminOverviewPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-white">128</span>
+            <span className="text-3xl font-extrabold text-white">{enrolledCount}</span>
             <span className="text-xs text-slate-400">Sem 5 CSE</span>
           </div>
           <div className="mt-3 text-xs text-emerald-400 flex items-center gap-1">
@@ -202,7 +260,7 @@ export default function AdminOverviewPage() {
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-white">114</span>
+            <span className="text-3xl font-extrabold text-white">{activePlansCount}</span>
             <span className="text-xs text-slate-400">Structured timetables</span>
           </div>
           <div className="mt-3 text-xs text-indigo-400 flex items-center gap-1">
