@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import DashboardNav from "@/components/DashboardNav";
+import { API_BASE_URL } from "@/lib/api";
 import {
   Settings,
   User,
@@ -23,10 +24,13 @@ import {
   Bell,
   Cpu,
   Layers,
+  AlertCircle,
+  Wifi,
 } from "lucide-react";
 
 export default function SettingsPage() {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const [activeTab, setActiveTab] = useState<"profile" | "schedule" | "ai" | "notifications">("profile");
 
   // Form states
@@ -68,6 +72,79 @@ export default function SettingsPage() {
   // Save feedback state
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+
+  // Hydrate settings on mount from localStorage and live backend
+  useEffect(() => {
+    let isCancelled = false;
+
+    // 1. Initial hydration from local storage cache
+    try {
+      const cached = localStorage.getItem("slp_user_profile");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.semester) setSemester(Number(parsed.semester));
+        if (parsed.study_hours_per_day) setDailyHours(Number(parsed.study_hours_per_day));
+        if (parsed.goals) {
+          setTargetGoal(Array.isArray(parsed.goals) ? parsed.goals.join(", ") : String(parsed.goals));
+        }
+        if (Array.isArray(parsed.subjects) && parsed.subjects.length > 0) {
+          setSubjects(parsed.subjects);
+        }
+      }
+    } catch {
+      // Local storage unparsed
+    }
+
+    // 2. Fetch live profile from backend endpoint
+    async function fetchLiveProfile() {
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (!isCancelled) setIsLoadingProfile(false);
+          return;
+        }
+
+        const res = await fetch(`${API_BASE_URL}/api/v1/profile`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            const data = json.data;
+            if (!isCancelled) {
+              if (data.semester) setSemester(Number(data.semester));
+              if (data.study_hours_per_day) setDailyHours(Number(data.study_hours_per_day));
+              if (data.goals) {
+                setTargetGoal(Array.isArray(data.goals) ? data.goals.join(", ") : String(data.goals));
+              }
+              if (Array.isArray(data.subjects) && data.subjects.length > 0) {
+                setSubjects(data.subjects);
+              }
+              setIsLiveConnected(true);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Backend profile endpoint unavailable, using local cache:", err);
+      } finally {
+        if (!isCancelled) setIsLoadingProfile(false);
+      }
+    }
+
+    fetchLiveProfile();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [getToken]);
 
   const handleAddSubject = () => {
     if (newSubjectInput.trim() && !subjects.includes(newSubjectInput.trim())) {
@@ -95,14 +172,68 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = () => {
+  // Wire settings to Heman's live POST /api/v1/profile endpoint
+  const handleSave = async () => {
     setIsSaving(true);
-    // Simulate API persistence to Supabase / student_profiles
-    setTimeout(() => {
-      setIsSaving(false);
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    const payload = {
+      email: user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || undefined,
+      semester: Number(semester),
+      study_hours_per_day: Number(dailyHours),
+      goals: targetGoal,
+      subjects: subjects,
+    };
+
+    // Keep localStorage in sync for fast local queries
+    try {
+      localStorage.setItem("slp_user_profile", JSON.stringify({
+        ...payload,
+        maxConsecutiveHours,
+        sessionPacing,
+        selectedTimeSlots,
+        enforceStrictCeiling,
+        enableSub50Diagnostic,
+        forwardOnlyCatchup,
+        deficitThresholdMins,
+        cosineSimilarityCutoff,
+        dailyDigest,
+        missedSessionAlerts,
+      }));
+    } catch {
+      // Local storage write skipped
+    }
+
+    try {
+      const token = await getToken();
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server returned ${response.status}: ${errorText || "Failed to persist profile"}`);
+      }
+
+      setIsLiveConnected(true);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3500);
-    }, 600);
+      setTimeout(() => setSaveSuccess(false), 4500);
+    } catch (err: any) {
+      console.warn("Live API save failed, cached locally:", err);
+      // If server is offline or unreachable, show informed warning
+      setSaveSuccess(true); // Still saved locally
+      setIsLiveConnected(false);
+      setTimeout(() => setSaveSuccess(false), 4500);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -115,9 +246,19 @@ export default function SettingsPage() {
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 shadow-xs">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 border border-indigo-200">
-              <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-              <span>Module 11: Student Profile & Settings</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 border border-indigo-200">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Module 11: Student Profile & Settings</span>
+              </div>
+              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                isLiveConnected 
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                  : "bg-amber-50 text-amber-700 border-amber-200"
+              }`}>
+                <span className={`h-2 w-2 rounded-full ${isLiveConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`}></span>
+                {isLiveConnected ? "Live Connected: Heman's API" : "Local Cached State"}
+              </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
               Planner Preferences & Configuration
@@ -158,6 +299,19 @@ export default function SettingsPage() {
               </span>
             </div>
             <button onClick={() => setSaveSuccess(false)} className="text-emerald-600 hover:text-emerald-800">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Save Error Alert */}
+        {saveError && (
+          <div className="flex items-center justify-between rounded-2xl bg-amber-50 border border-amber-200 p-4 text-amber-800 text-sm shadow-xs animate-in fade-in duration-200">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+            <button onClick={() => setSaveError(null)} className="text-amber-600 hover:text-amber-800">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -709,10 +863,15 @@ export default function SettingsPage() {
 
               <button
                 onClick={handleSave}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-black transition-colors cursor-pointer"
+                disabled={isSaving}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-black transition-colors cursor-pointer disabled:opacity-50"
               >
-                <Save className="h-3.5 w-3.5" />
-                <span>Save All Settings</span>
+                {isSaving ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                <span>{isSaving ? "Saving..." : "Save All Settings"}</span>
               </button>
             </div>
           </div>

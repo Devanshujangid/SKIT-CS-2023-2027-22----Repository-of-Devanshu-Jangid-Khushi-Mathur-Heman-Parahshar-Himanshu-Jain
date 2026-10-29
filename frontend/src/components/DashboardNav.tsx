@@ -65,7 +65,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
           <Sparkles className="h-4 w-4 text-indigo-600" />
           <span>Smart Learning</span>
         </div>
-        <nav className="flex items-center gap-1 sm:gap-2">
+        <nav className="flex items-center gap-1 sm:gap-2 overflow-x-auto py-0.5 max-w-full scrollbar-none">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = item.active;
