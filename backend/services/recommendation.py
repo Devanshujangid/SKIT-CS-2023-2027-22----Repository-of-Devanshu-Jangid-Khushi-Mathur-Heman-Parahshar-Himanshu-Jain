@@ -1,9 +1,17 @@
 
 from pathlib import Path
+import csv
 
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+try:
+    import pandas as pd
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    pd = None
+    TfidfVectorizer = None
+    cosine_similarity = None
+    SKLEARN_AVAILABLE = False
 
 
 # Coursera dataset path
@@ -13,6 +21,8 @@ DATASET_PATH = PROJECT_ROOT / "recommendation" / "data" / "Coursera.csv"
 
 def load_courses():
     """Load the existing Coursera dataset."""
+    if not SKLEARN_AVAILABLE:
+        return None
     df = pd.read_csv(DATASET_PATH)
 
     # Recreate combined_features if it is not already present.
@@ -29,15 +39,18 @@ def load_courses():
     return df
 
 
-# Load and vectorize courses once when this module is imported.
-df = load_courses()
+if SKLEARN_AVAILABLE:
+    df = load_courses()
+    tfidf = TfidfVectorizer(
+        stop_words="english",
+        max_features=5000
+    )
+    tfidf_matrix = tfidf.fit_transform(df["combined_features"])
+else:
+    df = None
+    tfidf = None
+    tfidf_matrix = None
 
-tfidf = TfidfVectorizer(
-    stop_words="english",
-    max_features=5000
-)
-
-tfidf_matrix = tfidf.fit_transform(df["combined_features"])
 
 
 
@@ -50,6 +63,10 @@ def recommend_courses(query, top_n=5):
 
     if not isinstance(top_n, int) or not 1 <= top_n <= 5:
         return []
+
+    if not SKLEARN_AVAILABLE or tfidf is None:
+        return []
+
 
     analyzer = tfidf.build_analyzer()
     query_terms = set(analyzer(query.strip()))

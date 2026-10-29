@@ -1,12 +1,22 @@
 import logging
 from pathlib import Path
+import csv
 
 import joblib
-import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+
+try:
+    import pandas as pd
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    pd = None
+    TfidfVectorizer = None
+    cosine_similarity = None
+    SKLEARN_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
 
 # Locate the CSV and cache directory from the repository root.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +47,18 @@ class RecommendationService:
             "size": stat.st_size,
             "mtime_ns": stat.st_mtime_ns,
         }
+
+        if not SKLEARN_AVAILABLE:
+            self.courses = []
+            try:
+                with open(DATASET_PATH, mode="r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        self.courses.append(row)
+                logger.info("Loaded Coursera dataset with standard parser (%d courses)", len(self.courses))
+            except Exception:
+                logger.warning("Failed to parse Coursera.csv in fallback mode", exc_info=True)
+            return
 
         if CACHE_PATH.is_file():
             try:
@@ -100,6 +122,30 @@ class RecommendationService:
 
         if not isinstance(top_n, int) or top_n < 1:
             return []
+
+        if not SKLEARN_AVAILABLE:
+            query_words = [w for w in query.lower().split() if len(w) > 2]
+            matches = []
+            for course in getattr(self, "courses", []):
+                text = (f"{course.get('Course Name', '')} {course.get('Course Description', '')} {course.get('Skills', '')}").lower()
+                matched_count = sum(1 for w in query_words if w in text)
+                if matched_count > 0:
+                    score = min(1.0, 0.25 + (matched_count * 0.12))
+                    try:
+                        rating = float(course.get("Course Rating", 0))
+                    except (ValueError, TypeError):
+                        rating = None
+                    matches.append({
+                        "course_name": str(course.get("Course Name", "")),
+                        "university": str(course.get("University", "")),
+                        "difficulty_level": str(course.get("Difficulty Level", "")),
+                        "course_rating": rating,
+                        "course_url": str(course.get("Course URL", "")),
+                        "similarity_score": round(score, 4),
+                    })
+            matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+            return matches[:top_n]
+
 
         try:
             query_vector = self.tfidf.transform([query.strip()])
