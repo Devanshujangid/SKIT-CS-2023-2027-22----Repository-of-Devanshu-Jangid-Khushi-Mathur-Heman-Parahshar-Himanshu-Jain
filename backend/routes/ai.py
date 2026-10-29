@@ -103,10 +103,63 @@ def get_gemini_client():
 def get_target_model() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
+def get_context_window_parameters() -> Dict[str, int]:
+    """Return configurable application-level token budgets."""
+    return {
+        "max_input_tokens": int(
+            os.getenv("GEMINI_MAX_INPUT_TOKENS", "30000")
+        ),
+        "max_output_tokens": int(
+            os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "8192")
+        ),
+    }
 
+def count_prompt_tokens(client, model, prompt, system_instruction=None):
+    """Count prompt tokens using the Gemini API."""
+    try:
+        count_config = (
+            types.CountTokensConfig(system_instruction=system_instruction)
+            if system_instruction
+            else None
+        )
+
+        response = client.models.count_tokens(
+            model=model,
+            contents=prompt,
+            config=count_config,
+        )
+
+        return response.total_tokens
+
+    except Exception as exc:
+        logger.warning("Gemini token counting failed: %s", exc)
+        return None
 # ------------------------------------------------------------------
 # Gemini generation helper
 # ------------------------------------------------------------------
+def count_prompt_tokens(
+    prompt: str,
+    system_instruction: Optional[str] = None,
+) -> int:
+    """Count tokens for the prompt and system instruction."""
+    client = get_gemini_client()
+    model = get_target_model()
+
+    config = types.CountTokensConfig(
+        system_instruction=system_instruction or None,
+    )
+
+    result = client.models.count_tokens(
+        model=model,
+        contents=prompt,
+        config=config,
+    )
+
+    if result.total_tokens is None:
+        raise RuntimeError("Gemini did not return a token count.")
+
+    return result.total_tokens
+
 
 def generate_gemini_response(
     prompt: str,
@@ -114,6 +167,41 @@ def generate_gemini_response(
 ) -> str:
     client = get_gemini_client()
     model = get_target_model()
+
+
+    parameters = get_context_window_parameters()
+    max_input_tokens = parameters["max_input_tokens"]
+    max_output_tokens = parameters["max_output_tokens"]
+
+    if max_input_tokens <= 0 or max_output_tokens <= 0:
+        raise ValueError("Gemini token budgets must be positive.")
+
+    input_tokens = count_prompt_tokens(
+        client=client,
+        model=model,
+        prompt=prompt,
+        system_instruction=system_instruction,
+    )
+    if input_tokens is None:
+        raise RuntimeError(
+        "Unable to count Gemini prompt tokens. "
+        "Request stopped to enforce the input token budget."
+    )
+
+    logger.info(
+        "Gemini context: model=%s input_tokens=%s "
+        "input_budget=%s output_budget=%s",
+        model,
+        input_tokens,
+        max_input_tokens,
+        max_output_tokens,
+    )
+
+    if input_tokens > max_input_tokens:
+        raise ValueError(
+            f"Prompt exceeds the configured input budget "
+            f"({input_tokens} > {max_input_tokens} tokens)."
+        )
 
     max_attempts = 3
     base_delay = 2
@@ -124,6 +212,7 @@ def generate_gemini_response(
             config = types.GenerateContentConfig(
                 response_mime_type="application/json",
                 system_instruction=system_instruction or None,
+                max_output_tokens=max_output_tokens,
             )
 
             response = client.models.generate_content(
