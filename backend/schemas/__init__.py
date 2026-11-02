@@ -11,11 +11,48 @@ from schemas.settings import (
     SettingsResponseSchema,
 )
 
+from schemas.assistant_tools import (
+    SystemActionType,
+    PriorityFilter,
+    TaskStatusFilter,
+    DateAlias,
+    ReadTasksTableParams,
+    GetActiveStudyPlanParams,
+    GetWeakTopicsParams,
+    GetAnalyticsSummaryParams,
+    TriggerAdaptiveRebalanceParams,
+    SearchLearningResourcesParams,
+    LogTaskExecutionParams,
+    UpdateStudyHoursCapacityParams,
+    AssistantToolCall,
+    AssistantActionResponseSchema,
+    TaskRecordItem,
+    ToolExecutionResult,
+)
+
 __all__ = [
+    # Settings Schemas
     "StudyHoursUpdateSchema",
     "AcademicGoalsUpdateSchema",
     "PasswordUpdateSchema",
     "NotificationSettingsSchema",
     "SettingsUpdateRequest",
     "SettingsResponseSchema",
+    # Assistant Tool & System Action Schemas
+    "SystemActionType",
+    "PriorityFilter",
+    "TaskStatusFilter",
+    "DateAlias",
+    "ReadTasksTableParams",
+    "GetActiveStudyPlanParams",
+    "GetWeakTopicsParams",
+    "GetAnalyticsSummaryParams",
+    "TriggerAdaptiveRebalanceParams",
+    "SearchLearningResourcesParams",
+    "LogTaskExecutionParams",
+    "UpdateStudyHoursCapacityParams",
+    "AssistantToolCall",
+    "AssistantActionResponseSchema",
+    "TaskRecordItem",
+    "ToolExecutionResult",
 ]

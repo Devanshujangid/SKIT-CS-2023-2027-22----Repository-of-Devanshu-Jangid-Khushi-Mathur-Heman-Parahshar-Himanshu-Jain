@@ -1,1 +1,99 @@
-# Prompts Package
+"""
+Prompts Package.
+Exports system instructions, Pydantic schemas, and prompt builders for:
+- Module 1: Study Plan Generation, Regeneration, and Adaptive Re-balancing
+- Module 2: AI Academic Assistant (Generate Quiz, Explain Topic, Create Revision Plan)
+"""
+
+from prompts.study_plan import (
+    OnboardingDataInput,
+    SubjectInput,
+    StudyPlanOutputSchema,
+    PlanOverview,
+    DaySchedule,
+    SessionItem,
+    MonthlyMilestone,
+    RegenerationInput,
+    MissedTaskInput,
+    AdaptivePlanInput,
+    STUDY_PLAN_SYSTEM_INSTRUCTION,
+    REGENERATION_SYSTEM_INSTRUCTION,
+    ADAPTIVE_PLAN_SYSTEM_INSTRUCTION,
+    build_study_plan_prompt,
+    build_regeneration_prompt,
+    build_adaptive_plan_prompt,
+    validate_study_plan_output,
+)
+
+from prompts.assistant import (
+    WeakTopicContextInput,
+    GenerateQuizRequestInput,
+    ExplainTopicRequestInput,
+    CreateRevisionPlanRequestInput,
+    QuizQuestionItem,
+    QuizOutputSchema,
+    CommonPitfallItem,
+    SelfCheckQuestionItem,
+    TopicExplanationOutputSchema,
+    RevisionPlanOutputSchema,
+    NonAcademicRefusalOutputSchema,
+    MODULE_2_ASSISTANT_BASE_INSTRUCTION,
+    GENERATE_QUIZ_SYSTEM_INSTRUCTION,
+    EXPLAIN_TOPIC_SYSTEM_INSTRUCTION,
+    CREATE_REVISION_PLAN_SYSTEM_INSTRUCTION,
+    build_generate_quiz_prompt,
+    build_explain_topic_prompt,
+    build_create_revision_plan_prompt,
+    build_assistant_prompt,
+    validate_quiz_output,
+    validate_explanation_output,
+    validate_revision_plan_output,
+    validate_refusal_output,
+)
+
+__all__ = [
+    # Module 1
+    "OnboardingDataInput",
+    "SubjectInput",
+    "StudyPlanOutputSchema",
+    "PlanOverview",
+    "DaySchedule",
+    "SessionItem",
+    "MonthlyMilestone",
+    "RegenerationInput",
+    "MissedTaskInput",
+    "AdaptivePlanInput",
+    "STUDY_PLAN_SYSTEM_INSTRUCTION",
+    "REGENERATION_SYSTEM_INSTRUCTION",
+    "ADAPTIVE_PLAN_SYSTEM_INSTRUCTION",
+    "build_study_plan_prompt",
+    "build_regeneration_prompt",
+    "build_adaptive_plan_prompt",
+    "validate_study_plan_output",
+    # Module 2
+    "WeakTopicContextInput",
+    "GenerateQuizRequestInput",
+    "ExplainTopicRequestInput",
+    "CreateRevisionPlanRequestInput",
+    "QuizQuestionItem",
+    "QuizOutputSchema",
+    "CommonPitfallItem",
+    "SelfCheckQuestionItem",
+    "TopicExplanationOutputSchema",
+    "RevisionSessionItem",
+    "RevisionPlanOutputSchema",
+    "NonAcademicRefusalOutputSchema",
+    "MODULE_2_ASSISTANT_BASE_INSTRUCTION",
+    "GENERATE_QUIZ_SYSTEM_INSTRUCTION",
+    "EXPLAIN_TOPIC_SYSTEM_INSTRUCTION",
+    "CREATE_REVISION_PLAN_SYSTEM_INSTRUCTION",
+    "build_generate_quiz_prompt",
+    "build_explain_topic_prompt",
+    "build_create_revision_plan_prompt",
+    "build_assistant_prompt",
+    "validate_quiz_output",
+    "validate_explanation_output",
+    "validate_revision_plan_output",
+    "validate_refusal_output",
+]
+
