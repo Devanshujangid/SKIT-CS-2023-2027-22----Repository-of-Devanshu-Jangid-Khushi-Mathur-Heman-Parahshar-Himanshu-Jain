@@ -47,6 +47,31 @@ interface SpeechRecognitionWindow extends Window {
   webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
 }
 
+export function normalizeTechnicalTerms(text: string): string {
+  const technicalTerms: [RegExp, string][] = [
+    [/\bpostgre\s*sql\b/gi, "PostgreSQL"],
+    [/\bpostgres(?:\s*sql)?\b/gi, "PostgreSQL"],
+    [/\bnext\s*\.?\s*js\b/gi, "Next.js"],
+    [/\bfast\s+a\s+p\s+i\b/gi, "FastAPI"],
+    [/\bfast\s*api\b/gi, "FastAPI"],
+    [/\bsuper\s*base\b/gi, "Supabase"],
+    [/\bgit\s*hub\b/gi, "GitHub"],
+    [/\btype\s*script\b/gi, "TypeScript"],
+    [/\bjava\s*script\b/gi, "JavaScript"],
+    [/\bg\s+mini\b/gi, "Gemini"],
+    [/\bnode\s*\.?\s*js\b/gi, "Node.js"],
+    [/\bmy\s*sql\b/gi, "MySQL"],
+    [/\bmongo\s*db\b/gi, "MongoDB"],
+    [/\bvs\s+code\b/gi, "VS Code"],
+  ];
+
+  return technicalTerms.reduce(
+    (normalizedText, [pattern, replacement]) =>
+      normalizedText.replace(pattern, replacement),
+    text
+  );
+}
+
 export function useSpeechRecognition(): SpeechRecognitionResult {
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -89,7 +114,11 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
           event.results[i][0].transcript + " ";
       }
 
-      setTranscript(currentTranscript.trim());
+       const normalizedTranscript = normalizeTechnicalTerms(
+    currentTranscript.trim()
+  );
+
+      setTranscript(normalizedTranscript);
     };
 
     recognition.onerror = (event) => {
