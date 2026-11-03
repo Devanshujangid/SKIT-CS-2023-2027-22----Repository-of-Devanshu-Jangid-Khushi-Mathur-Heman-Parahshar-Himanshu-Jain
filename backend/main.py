@@ -16,7 +16,7 @@ load_dotenv()
 
 from auth import verify_clerk_token
 from database import get_db
-from routes.ai import router as ai_router
+from routes.ai import router as ai_router, ai_chat, ChatRequest
 from routes.plans import router as plans_router
 from routes import export
 from routes.tasks import router as tasks_router
@@ -63,6 +63,19 @@ app.include_router(tasks_router)
 app.include_router(recommendations_router)
 app.include_router(resources_router)
 app.include_router(analytics_router)
+
+
+# ============================================================
+# DIRECT CHAT ALIAS ROUTE (POST /api/v1/chat)
+# ============================================================
+
+@app.post("/api/v1/chat", tags=["AI Chat"])
+async def chat_direct_alias(
+    payload: ChatRequest,
+    user_data: dict = Depends(verify_clerk_token),
+):
+    """Direct endpoint for POST /api/v1/chat delegating to ai_chat."""
+    return await ai_chat(payload, user_data)
 
 
 # ============================================================
