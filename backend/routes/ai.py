@@ -6,12 +6,15 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
+from starlette.concurrency import run_in_threadpool
+from services.recommendation_service import recommendation_service
 
 from database import (
     get_db,
@@ -55,6 +58,14 @@ generation_status: Dict[str, Dict[str, str]] = {}
 
 class TestPromptRequest(BaseModel):
     prompt: str
+
+class ChatRequest(BaseModel):
+    message: str = Field(
+        ...,
+        min_length=2,
+        max_length=2000,
+        description="Student's question or learning topic.",
+    )
 
 
 class GeneratePlanRequest(BaseModel):
@@ -101,7 +112,7 @@ def get_gemini_client():
 
 
 def get_target_model() -> str:
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    return os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 def get_context_window_parameters() -> Dict[str, int]:
     """Return configurable application-level token budgets."""
@@ -116,17 +127,18 @@ def get_context_window_parameters() -> Dict[str, int]:
 
 def count_prompt_tokens(client, model, prompt, system_instruction=None):
     """Count prompt tokens using the Gemini API."""
-    try:
-        count_config = (
-            types.CountTokensConfig(system_instruction=system_instruction)
-            if system_instruction
-            else None
-        )
 
+    combined_prompt = (
+        f"{system_instruction}\n\n{prompt}"
+        if system_instruction
+        else prompt
+    )
+    try:
+        
         response = client.models.count_tokens(
             model=model,
-            contents=prompt,
-            config=count_config,
+            contents=combined_prompt,
+            
         )
 
         return response.total_tokens
@@ -134,31 +146,8 @@ def count_prompt_tokens(client, model, prompt, system_instruction=None):
     except Exception as exc:
         logger.warning("Gemini token counting failed: %s", exc)
         return None
-# ------------------------------------------------------------------
-# Gemini generation helper
-# ------------------------------------------------------------------
-def count_prompt_tokens(
-    prompt: str,
-    system_instruction: Optional[str] = None,
-) -> int:
-    """Count tokens for the prompt and system instruction."""
-    client = get_gemini_client()
-    model = get_target_model()
 
-    config = types.CountTokensConfig(
-        system_instruction=system_instruction or None,
-    )
 
-    result = client.models.count_tokens(
-        model=model,
-        contents=prompt,
-        config=config,
-    )
-
-    if result.total_tokens is None:
-        raise RuntimeError("Gemini did not return a token count.")
-
-    return result.total_tokens
 
 
 def generate_gemini_response(
@@ -807,3 +796,105 @@ async def adapt_study_plan(
             status_code=500,
             detail="Adaptive plan generation failed. Check backend logs.",
         ) from exc
+    # ------------------------------------------------------------------
+# AI CHAT + COURSERA RECOMMENDATIONS
+# ------------------------------------------------------------------
+
+@router.post("/chat")
+async def ai_chat(
+    payload: ChatRequest,
+    user_data: dict = Depends(verify_clerk_token),
+):
+    clerk_id = _get_clerk_id(user_data)
+    message = payload.message.strip()
+
+    if len(message) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a valid learning question.",
+        )
+
+    try:
+        logger.info(
+            "AI chat request received for user: %s",
+            clerk_id,
+        )
+
+        # Generate the topic explanation using existing Gemini logic.
+        user_prompt = f"""
+        Answer the student's learning question clearly.
+
+        Student question:
+        {message}
+
+        Return valid JSON only, using this structure:
+        {{
+            "explanation": "Detailed but easy-to-understand explanation",
+            "key_points": [
+                "Important point 1",
+                "Important point 2"
+            ],
+            "follow_up_suggestion": "A useful next question to explore"
+        }}
+        """
+
+        system_instruction = """
+        You are the AI learning assistant of Smart Learning Planner.
+        Explain academic concepts in simple, student-friendly language.
+        Use accurate information and practical examples.
+        Return valid JSON only.
+        """
+
+        response_text = generate_gemini_response(
+            prompt=user_prompt,
+            system_instruction=system_instruction,
+        )
+
+        ai_response = extract_json(response_text)
+
+        explanation = ai_response.get("explanation")
+
+        if not isinstance(explanation, str) or not explanation.strip():
+            raise ValueError(
+                "Gemini response is missing a valid explanation."
+            )
+
+        # Retrieve relevant Coursera courses using the existing TF-IDF engine.
+        recommendations = await run_in_threadpool(
+            recommendation_service.recommend_courses,
+            query=message,
+            top_n=5,
+        )
+
+        recommendations = recommendations or []
+
+        logger.info(
+            "AI chat completed: user=%s recommendations=%s",
+            clerk_id,
+            len(recommendations),
+        )
+
+        return {
+            "success": True,
+            "explanation": explanation,
+            "key_points": ai_response.get("key_points", []),
+            "follow_up_suggestion": ai_response.get(
+                "follow_up_suggestion"
+            ),
+            "recommendations": recommendations,
+            "recommendation_count": len(recommendations),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        logger.exception(
+            "AI chat generation failed for user: %s",
+            clerk_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate AI response. Please try again.",
+        )
