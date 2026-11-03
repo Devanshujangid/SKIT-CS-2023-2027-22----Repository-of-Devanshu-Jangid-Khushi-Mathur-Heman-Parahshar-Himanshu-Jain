@@ -7,8 +7,10 @@ from pathlib import Path
 
 import httpx
 import jwt
+from typing import List, Union
+
 from dotenv import load_dotenv
-from fastapi import HTTPException, Security, status
+from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -157,3 +159,80 @@ async def verify_clerk_token(
             detail="Invalid or expired Clerk token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
+def require_role(allowed_roles: Union[str, List[str]]):
+    """
+    Enforces Role-Based Access Control (RBAC).
+    Extracts role from Clerk JWT claims (public_metadata or role claim)
+    and falls back to querying the users table in Supabase.
+    """
+    if isinstance(allowed_roles, str):
+        roles_list = [allowed_roles]
+    else:
+        roles_list = list(allowed_roles)
+
+    async def role_checker(
+        token_payload: dict = Depends(verify_clerk_token),
+    ) -> dict:
+        clerk_id = token_payload.get("sub")
+        if not clerk_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication token missing user identity",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # 1. Check custom claims in Clerk token metadata
+        metadata = (
+            token_payload.get("public_metadata")
+            or token_payload.get("metadata")
+            or {}
+        )
+        role = metadata.get("role") or token_payload.get("role")
+
+        # 2. If not embedded in JWT, query the Supabase database
+        if not role:
+            try:
+                from database import get_db
+                db = get_db()
+                user_res = (
+                    db.table("users")
+                    .select("role")
+                    .eq("clerk_id", clerk_id)
+                    .limit(1)
+                    .execute()
+                )
+                if user_res.data and user_res.data[0].get("role"):
+                    role = user_res.data[0]["role"]
+                else:
+                    role = "student"
+            except Exception:
+                logger.warning(
+                    "Could not retrieve user role from database for %s; defaulting to 'student'",
+                    clerk_id,
+                )
+                role = "student"
+
+        # 3. Check role authorization
+        if role not in roles_list:
+            logger.warning(
+                "Access denied for user %s: role '%s' not in required roles %s",
+                clerk_id,
+                role,
+                roles_list,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access forbidden: role '{role}' lacks permission for this endpoint. Required role(s): {roles_list}",
+            )
+
+        token_payload["role"] = role
+        return token_payload
+
+    return role_checker
+
+
+# Named Convenience Dependencies
+require_admin = require_role(["admin"])
+require_student = require_role(["student", "admin"])

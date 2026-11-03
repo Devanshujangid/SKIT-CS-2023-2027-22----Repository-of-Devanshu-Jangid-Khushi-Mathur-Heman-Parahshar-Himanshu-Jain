@@ -17,6 +17,7 @@ import FocusWeakTopicsWidget, {
   WeakTopicItem,
 } from "@/components/FocusWeakTopicsWidget";
 import E2EFlowTestModal from "@/components/E2EFlowTestModal";
+import DashboardNav from "@/components/DashboardNav";
 import {
   BookOpen,
   Clock,
@@ -1398,6 +1399,9 @@ export default function DashboardPage() {
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8 print:bg-white print:p-0">
       <div className="mx-auto max-w-6xl space-y-8 print:space-y-4">
         
+        {/* Navigation Tabs (Dashboard, Analytics Module 8, Settings Module 11, Admin) */}
+        <DashboardNav />
+
         {/* Testing & Navigation Control Bar with Live API Status */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm print:hidden">
           <div className="flex items-center gap-3">

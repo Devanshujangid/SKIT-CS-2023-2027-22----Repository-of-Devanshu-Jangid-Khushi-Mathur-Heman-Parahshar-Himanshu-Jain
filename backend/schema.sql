@@ -1,6 +1,14 @@
 
 -- ============================================================
--- SMART LEARNING PLANNER - DATABASE SCHEMA
+-- SMART LEARNING PLANNER - FROZEN DATABASE SCHEMA SPECIFICATION
+-- ============================================================
+-- Status: FROZEN / PRODUCTION BASELINE (No DDL modifications without change-order)
+-- Schema Version: 1.2.0-FROZEN
+-- Checkpoint Milestone: Mid-Term 50% Architecture Evaluation (October 31, 2026)
+-- Baseline Git Commit SHA: 80e6f0239e24ea5832c32942398cdd3af8e72e10
+-- Core Tables: users, student_profiles, study_plans, tasks
+-- Stored Procedures: public.create_study_plan_version()
+-- Security: Row Level Security (RLS) enabled on all tables with Clerk JWT auth
 -- ============================================================
 
 -- ============================================================
@@ -37,7 +45,7 @@ ADD COLUMN IF NOT EXISTS subjects TEXT[] NOT NULL DEFAULT '{}';
 
 
 -- ============================================================
--- STUDY PLANS TABLE
+-- STUDY PLANS TABLE (WITH ADAPTIVE VERSIONING SUPPORT)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS public.study_plans (
@@ -47,16 +55,71 @@ CREATE TABLE IF NOT EXISTS public.study_plans (
     plan_data JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    CONSTRAINT unique_user_study_plan UNIQUE (user_id)
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- Migration for existing databases
+-- Migration for existing databases: Remove legacy single-plan unique constraint
 ALTER TABLE public.study_plans
-ADD CONSTRAINT unique_user_study_plan UNIQUE (user_id);
+DROP CONSTRAINT IF EXISTS unique_user_study_plan;
+
+-- Enforce at most one active plan per user (allows immutable historical versions)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_study_plans_one_active_per_user
+ON public.study_plans (user_id)
+WHERE is_active = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_study_plans_user_active_created
 ON public.study_plans(user_id, is_active, created_at DESC);
+
+
+-- ============================================================
+-- STORED PROCEDURE: ATOMIC STUDY PLAN VERSIONING
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.create_study_plan_version(
+    p_user_id UUID,
+    p_plan_data JSONB
+)
+RETURNS SETOF public.study_plans
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    new_plan public.study_plans;
+BEGIN
+    -- Serialize concurrent plan updates for the same user.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(p_user_id::TEXT, 0)
+    );
+
+    -- Create the new version as inactive first.
+    INSERT INTO public.study_plans (
+        user_id,
+        plan_data,
+        is_active
+    )
+    VALUES (
+        p_user_id,
+        p_plan_data,
+        FALSE
+    )
+    RETURNING * INTO new_plan;
+
+    -- Archive the previous active plan.
+    UPDATE public.study_plans
+    SET is_active = FALSE,
+        updated_at = NOW()
+    WHERE user_id = p_user_id
+      AND is_active = TRUE;
+
+    -- Activate the new version.
+    UPDATE public.study_plans
+    SET is_active = TRUE,
+        updated_at = NOW()
+    WHERE id = new_plan.id
+    RETURNING * INTO new_plan;
+
+    RETURN NEXT new_plan;
+END;
+$$;
 
 
 -- ============================================================
@@ -293,3 +356,22 @@ USING (
           AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
     )
 );
+
+
+-- ============================================================
+-- ROW LEVEL SECURITY - USERS
+-- ============================================================
+
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Students can view their own user record"
+ON public.users;
+
+CREATE POLICY "Students can view their own user record"
+ON public.users
+FOR SELECT
+TO authenticated
+USING (
+    clerk_id = (SELECT auth.jwt() ->> 'sub')
+);
+
