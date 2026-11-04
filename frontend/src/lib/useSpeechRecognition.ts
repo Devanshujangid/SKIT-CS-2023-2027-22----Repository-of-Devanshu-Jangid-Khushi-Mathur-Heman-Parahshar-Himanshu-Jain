@@ -59,6 +59,7 @@ export function normalizeTechnicalTerms(text: string): string {
     [/\btype\s*script\b/gi, "TypeScript"],
     [/\bjava\s*script\b/gi, "JavaScript"],
     [/\bg\s+mini\b/gi, "Gemini"],
+    [/\bgemini\b/gi, "Gemini"],
     [/\bnode\s*\.?\s*js\b/gi, "Node.js"],
     [/\bmy\s*sql\b/gi, "MySQL"],
     [/\bmongo\s*db\b/gi, "MongoDB"],
