@@ -432,3 +432,94 @@ class ToolExecutionResult(BaseModel):
         default_factory=lambda: datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
         description="Timestamp when tool was executed"
     )
+
+
+# ===========================================================================
+# 6. System Tool Registry & LLM Function Declaration Helpers
+# ===========================================================================
+
+SYSTEM_ACTION_REGISTRY: Dict[SystemActionType, Dict[str, Any]] = {
+    "read_tasks_table": {
+        "name": "read_tasks_table",
+        "description": (
+            "Query the student's scheduled study tasks and daily agenda. "
+            "Essential for answering questions like 'What is my priority today?', "
+            "'What tasks do I have scheduled for tomorrow?', or 'Show pending exam sessions'."
+        ),
+        "schema": ReadTasksTableParams,
+        "is_state_mutating": False,
+        "requires_confirmation_default": False,
+    },
+    "get_active_study_plan": {
+        "name": "get_active_study_plan",
+        "description": "Fetch the student's currently active 7-day study plan, daily hours, and subject allocations.",
+        "schema": GetActiveStudyPlanParams,
+        "is_state_mutating": False,
+        "requires_confirmation_default": False,
+    },
+    "get_weak_topics_telemetry": {
+        "name": "get_weak_topics_telemetry",
+        "description": "Retrieve deterministic diagnostic weak topic alerts, study deficits, and mastery flags.",
+        "schema": GetWeakTopicsParams,
+        "is_state_mutating": False,
+        "requires_confirmation_default": False,
+    },
+    "get_analytics_summary": {
+        "name": "get_analytics_summary",
+        "description": "Fetch velocity, study adherence percentages, and completed study hours summary.",
+        "schema": GetAnalyticsSummaryParams,
+        "is_state_mutating": False,
+        "requires_confirmation_default": False,
+    },
+    "trigger_adaptive_rebalance": {
+        "name": "trigger_adaptive_rebalance",
+        "description": "Trigger adaptive schedule rebalancing to redistribute missed or incomplete study sessions into future days.",
+        "schema": TriggerAdaptiveRebalanceParams,
+        "is_state_mutating": True,
+        "requires_confirmation_default": True,
+    },
+    "search_learning_resources": {
+        "name": "search_learning_resources",
+        "description": "Search recommended Coursera courses and pedagogical resources via TF-IDF vector matching.",
+        "schema": SearchLearningResourcesParams,
+        "is_state_mutating": False,
+        "requires_confirmation_default": False,
+    },
+    "log_task_execution": {
+        "name": "log_task_execution",
+        "description": "Log completion telemetry (actual study minutes, outcome notes) for a scheduled task session.",
+        "schema": LogTaskExecutionParams,
+        "is_state_mutating": True,
+        "requires_confirmation_default": False,
+    },
+    "update_study_hours_capacity": {
+        "name": "update_study_hours_capacity",
+        "description": "Modify the student's daily available study hours limit in their profile settings.",
+        "schema": UpdateStudyHoursCapacityParams,
+        "is_state_mutating": True,
+        "requires_confirmation_default": True,
+    },
+}
+
+
+def get_system_tool_declarations() -> List[Dict[str, Any]]:
+    """
+    Generates OpenAPI/JSON Schema function calling declarations for all system tools,
+    directly conforming to Gemini (`FunctionDeclaration`) and OpenAI function calling formats.
+    """
+    declarations = []
+    for action_key, meta in SYSTEM_ACTION_REGISTRY.items():
+        param_schema: BaseModel = meta["schema"]
+        json_schema = param_schema.model_json_schema()
+        
+        declarations.append({
+            "name": meta["name"],
+            "description": meta["description"],
+            "parameters": {
+                "type": "object",
+                "properties": json_schema.get("properties", {}),
+                "required": json_schema.get("required", []),
+            },
+        })
+    return declarations
+

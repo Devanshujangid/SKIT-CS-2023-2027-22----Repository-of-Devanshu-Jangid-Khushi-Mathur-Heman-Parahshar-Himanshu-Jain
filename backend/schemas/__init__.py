@@ -28,6 +28,8 @@ from schemas.assistant_tools import (
     AssistantActionResponseSchema,
     TaskRecordItem,
     ToolExecutionResult,
+    SYSTEM_ACTION_REGISTRY,
+    get_system_tool_declarations,
 )
 
 __all__ = [
@@ -55,4 +57,6 @@ __all__ = [
     "AssistantActionResponseSchema",
     "TaskRecordItem",
     "ToolExecutionResult",
+    "SYSTEM_ACTION_REGISTRY",
+    "get_system_tool_declarations",
 ]

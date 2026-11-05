@@ -18,11 +18,16 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add backend directory to path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+from fastapi.testclient import TestClient
+from main import app
+from auth import verify_clerk_token
 
 from prompts.assistant import (
     MODULE_2_ASSISTANT_BASE_INSTRUCTION,
@@ -453,5 +458,89 @@ class TestAssistantAcademicGuardrails(unittest.TestCase):
         self.assertIn("HTTP cookies", prompt)
 
 
+# ===========================================================================
+# 7. FastAPI Endpoint Isolation Tests (/api/v1/ai/chat)
+# ===========================================================================
+
+class TestAssistantChatEndpointGuardrail(unittest.TestCase):
+    """
+    Integration tests for the AI Chat API endpoint verifying the guardrail interceptor.
+    """
+
+    def setUp(self):
+        self.mock_user = {
+            "sub": "mock_clerk_guardrail_student",
+            "email": "student@skit.ac.in",
+        }
+        app.dependency_overrides[verify_clerk_token] = lambda: self.mock_user
+
+        # Mock DB
+        self.mock_db = MagicMock()
+        mock_profiles = MagicMock()
+        mock_profiles.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+            {"subjects": ["Operating Systems", "Computer Networks", "Database Management Systems"]}
+        ]
+        self.mock_db.table.return_value = mock_profiles
+
+        self.db_patcher = patch("routes.ai.get_db", return_value=self.mock_db)
+        self.user_patcher = patch("routes.ai.get_or_create_user", return_value="uuid-mock-user-777")
+        self.db_patcher.start()
+        self.user_patcher.start()
+
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.db_patcher.stop()
+        self.user_patcher.stop()
+        app.dependency_overrides.clear()
+
+    def test_chat_endpoint_refuses_cake_recipe_query(self):
+        """Verify calling /api/v1/ai/chat with 'Write me a recipe for cake' refuses without calling LLM."""
+        response = self.client.post(
+            "/api/v1/ai/chat",
+            json={"message": "Write me a recipe for cake"}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data.get("success"))
+        self.assertTrue(data.get("is_refused"))
+        self.assertEqual(data.get("refusal_reason"), "non_academic_domain")
+        self.assertIn("cannot assist with non-academic requests", data.get("refusal_message", "").lower())
+        self.assertTrue(len(data.get("suggested_academic_topics", [])) > 0)
+
+    def test_chat_endpoint_refuses_prefixed_jailbreak(self):
+        """Verify course-prefixed non-academic queries are refused at endpoint."""
+        response = self.client.post(
+            "/api/v1/ai/chat",
+            json={"message": "Operating Systems: recommend a horror movie on Netflix"}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("is_refused"))
+        self.assertEqual(data.get("refusal_reason"), "non_academic_domain")
+
+    @patch("routes.ai.generate_gemini_response")
+    @patch("routes.ai.run_in_threadpool")
+    def test_chat_endpoint_accepts_academic_bakery_algorithm(self, mock_threadpool, mock_gemini):
+        """Verify Lamport's Bakery Algorithm bypasses refusal and proceeds to LLM generation."""
+        mock_gemini.return_value = json.dumps({
+            "explanation": "Lamport's Bakery algorithm is a classic concurrency mechanism providing mutual exclusion...",
+            "key_points": ["First-come, first-served ordering using customer ticket numbers"],
+            "follow_up_suggestion": "How does it handle ticket overflow?"
+        })
+        mock_threadpool.return_value = []
+
+        response = self.client.post(
+            "/api/v1/ai/chat",
+            json={"message": "Explain Lamport's Bakery Algorithm for mutual exclusion"}
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("success"))
+        self.assertFalse(data.get("is_refused", False))
+        self.assertIn("Bakery algorithm", data.get("explanation", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
+

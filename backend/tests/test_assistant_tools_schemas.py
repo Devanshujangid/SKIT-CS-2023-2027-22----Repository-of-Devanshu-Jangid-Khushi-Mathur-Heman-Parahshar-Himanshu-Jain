@@ -43,6 +43,8 @@ from schemas.assistant_tools import (
     AssistantActionResponseSchema,
     TaskRecordItem,
     ToolExecutionResult,
+    SYSTEM_ACTION_REGISTRY,
+    get_system_tool_declarations,
 )
 
 
@@ -308,6 +310,47 @@ class TestAssistantToolSchemas(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.record_count, 2)
         self.assertEqual(len(result.data), 2)
+
+    # =========================================================================
+    # 6. Tool Registry & Declarations Generation Tests
+    # =========================================================================
+
+    def test_system_action_registry_completeness(self):
+        """Verify registry maps all 8 actions with schemas and metadata."""
+        expected_actions = [
+            "read_tasks_table",
+            "get_active_study_plan",
+            "get_weak_topics_telemetry",
+            "get_analytics_summary",
+            "trigger_adaptive_rebalance",
+            "search_learning_resources",
+            "log_task_execution",
+            "update_study_hours_capacity",
+        ]
+        for action in expected_actions:
+            self.assertIn(action, SYSTEM_ACTION_REGISTRY)
+            entry = SYSTEM_ACTION_REGISTRY[action]
+            self.assertEqual(entry["name"], action)
+            self.assertIn("description", entry)
+            self.assertIn("schema", entry)
+
+        # Confirm read_tasks_table is non-mutating and does not require confirmation
+        read_tasks_meta = SYSTEM_ACTION_REGISTRY["read_tasks_table"]
+        self.assertFalse(read_tasks_meta["is_state_mutating"])
+        self.assertFalse(read_tasks_meta["requires_confirmation_default"])
+
+    def test_get_system_tool_declarations_generates_valid_spec(self):
+        """Verify declarations export proper JSON schema properties for LLMs."""
+        declarations = get_system_tool_declarations()
+        self.assertEqual(len(declarations), 8)
+
+        # Find read_tasks_table declaration
+        tasks_decl = next((d for d in declarations if d["name"] == "read_tasks_table"), None)
+        self.assertIsNotNone(tasks_decl)
+        self.assertIn("target_date", tasks_decl["parameters"]["properties"])
+        self.assertIn("priority", tasks_decl["parameters"]["properties"])
+        self.assertIn("status", tasks_decl["parameters"]["properties"])
+
 
 
 if __name__ == "__main__":
