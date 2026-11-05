@@ -726,5 +726,51 @@ The implementation is ready to be committed and pushed.
 17. Ran full test suite with all 85 unit tests passing (100% success rate in 0.21s).
 
 
+## Task – Notifications Table & REST CRUD Subsystem (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and created the authoritative database migration script `backend/migration/notifications.sql` for Supabase PostgreSQL.
+2. Created the `public.notifications` table structured with:
+   - `id`: UUID primary key defaulting to `gen_random_uuid()`.
+   - `user_id`: UUID foreign key referencing `public.users(id)` with `ON DELETE CASCADE`.
+   - `type`: Category indicator (`'system'`, `'reminder'`, `'alert'`, `'rebalance'`, `'achievement'`).
+   - `title`: Optional short notification heading.
+   - `message`: Required text notification body.
+   - `is_read`: Boolean flag defaulting to `FALSE` for tracking read/unread status.
+   - `read_at`: Timestamp recording when a student marked the alert as read.
+   - `created_at`: Creation timestamp defaulting to `NOW()`.
+3. Created performance indexes:
+   - `idx_notifications_user_created` on `(user_id, created_at DESC)` for efficient reverse-chronological notification list feeds.
+   - Partial index `idx_notifications_user_unread` on `(user_id, is_read) WHERE is_read = FALSE` for real-time unread badge count calculation.
+4. Enforced strict Row Level Security (RLS) on `public.notifications` with Clerk JWT claims:
+   - `SELECT` policy restricting student access strictly to notifications where `users.clerk_id = auth.jwt() ->> 'sub'`.
+   - `INSERT` policy ensuring notifications are attributed to authenticated students.
+   - `UPDATE` policy with matching `USING` and `WITH CHECK` clauses preventing IDOR cross-tenant status tampering.
+   - `DELETE` policy allowing students to dismiss their own notifications safely.
+5. Consolidated the complete table definition and RLS policies into `backend/schema.sql` to maintain a frozen production baseline.
+6. Designed Pydantic schemas in `backend/schemas/notifications.py` (`NotificationCreateRequest`, `NotificationResponse`, `NotificationListResponse`, `NotificationStatusUpdateResponse`, `NotificationBulkReadResponse`) and registered them in `backend/schemas/__init__.py`.
+7. Implemented production FastAPI routes in `backend/routes/notifications.py`:
+   - `GET /api/v1/notifications`: Retrieves reverse-chronological notification feeds with pagination (`limit`, `offset`), optional `unread_only` filtering, and exact unread badge counts.
+   - `PATCH /api/v1/notifications/{id}/read`: Validates UUID format, verifies record ownership, and updates `is_read = TRUE` and `read_at = NOW()`.
+   - `PATCH /api/v1/notifications/read-all` & `POST /api/v1/notifications/mark-all-read`: Bulk marks unread notifications as read, providing seamless compatibility with `DashboardNav.tsx`.
+   - `POST /api/v1/notifications`: Internal/system creation route for generating rebalance and study session alerts.
+   - `DELETE /api/v1/notifications/{id}`: Enables notification dismissal while enforcing ownership isolation.
+8. Verified router registration in `backend/main.py` and validated OpenAPI path registrations across all notification routes.
+9. Implemented comprehensive automated test suite in `backend/tests/test_notifications.py` covering:
+   - Notification retrieval with unread badge calculation.
+   - Unread-only filtering.
+   - Notification creation.
+   - Successful marking as read with timestamp update.
+   - HTTP 404 response when notification does not exist or belongs to another student.
+   - HTTP 422 validation on malformed UUID strings.
+   - Bulk mark-as-read operation.
+   - Notification deletion.
+   - HTTP 401 rejection on missing/invalid Clerk user credentials.
+   - Pydantic schema validation rejecting blank message payloads.
+10. Executed full unit test suite with 10/10 test cases passing in 0.014s (100% success rate).
+
+
+
 
 
