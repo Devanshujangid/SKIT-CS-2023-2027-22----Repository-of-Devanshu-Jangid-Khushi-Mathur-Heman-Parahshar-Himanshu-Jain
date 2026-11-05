@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { 
   CalendarDays, 
   BarChart3, 
@@ -19,19 +20,20 @@ import {
   ArrowRight,
   X
 } from "lucide-react";
+import { API_BASE_URL } from "@/lib/api";
 import AiAssistantDrawer from "@/components/AiAssistantDrawer";
 
 interface DashboardNavProps {
   showBackToDashboard?: boolean;
 }
 
-interface NotificationItem {
+export interface NotificationItem {
   id: string;
   type: "exam" | "weak_topic" | "adaptive" | "course";
   title: string;
   description: string;
   time: string;
-  unread: boolean;
+  is_read: boolean;
 }
 
 const INITIAL_NOTIFICATIONS: NotificationItem[] = [
@@ -41,7 +43,7 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
     title: "Upcoming Mid-Term Exam",
     description: "Operating Systems (Units 1-3) on Nov 5, 2026. 4 days remaining to target process synchronization.",
     time: "15m ago",
-    unread: true,
+    is_read: false,
   },
   {
     id: "notif-2",
@@ -49,7 +51,7 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
     title: "Unresolved Weak Topic",
     description: "Process Synchronization flagged as 'Needs Revision' (Study deficit: -90m, Sub-50% duration).",
     time: "1h ago",
-    unread: true,
+    is_read: false,
   },
   {
     id: "notif-3",
@@ -57,7 +59,7 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
     title: "Schedule Re-balanced",
     description: "Catch-up session placed on Wednesday 18:00 without exceeding 4.5h daily hours ceiling.",
     time: "3h ago",
-    unread: false,
+    is_read: true,
   },
   {
     id: "notif-4",
@@ -65,18 +67,76 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
     title: "New Coursera Recommendation",
     description: "Matched 'Operating Systems and You' (Google / Coursera) with 0.46 similarity score.",
     time: "1d ago",
-    unread: false,
+    is_read: true,
   },
 ];
 
 export default function DashboardNav({ showBackToDashboard = false }: DashboardNavProps) {
   const pathname = usePathname();
+  const { getToken } = useAuth();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   const notificationRef = useRef<HTMLDivElement>(null);
 
-  const unreadCount = notifications.filter((n) => n.unread).length;
+  // Unread badge counter: Count alerts where is_read is false
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+
+  // Live Notifications: Fetch data from GET /api/v1/notifications on mount
+  const fetchLiveNotifications = useCallback(async () => {
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/notifications`, {
+        headers,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawList = Array.isArray(data.notifications) 
+          ? data.notifications 
+          : (Array.isArray(data) ? data : []);
+
+        if (rawList.length > 0) {
+          interface RawNotificationPayload {
+            id?: string;
+            type?: "exam" | "weak_topic" | "adaptive" | "course";
+            title?: string;
+            description?: string;
+            message?: string;
+            time?: string;
+            is_read?: boolean;
+            unread?: boolean;
+          }
+
+          setNotifications(
+            rawList.map((item: RawNotificationPayload, idx: number) => ({
+              id: item.id || `notif-live-${idx}`,
+              type: item.type || "exam",
+              title: item.title || "Academic Notification",
+              description: item.description || item.message || "",
+              time: item.time || "Just now",
+              is_read: typeof item.is_read === "boolean" 
+                ? item.is_read 
+                : (typeof item.unread === "boolean" ? !item.unread : false),
+            }))
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch live notifications, retaining local telemetry:", err);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    fetchLiveNotifications();
+  }, [fetchLiveNotifications]);
 
   // Close notifications dropdown on outside click
   useEffect(() => {
@@ -94,14 +154,46 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
     };
   }, [isNotificationsOpen]);
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+  const markAllAsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      await fetch(`${API_BASE_URL}/api/v1/notifications/mark-all-read`, {
+        method: "POST",
+        headers,
+      });
+    } catch (e) {
+      console.warn("Failed to sync mark-all-read with backend:", e);
+    }
   };
 
-  const markAsRead = (id: string) => {
+  const markAsRead = async (id: string) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, unread: false } : n))
+      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
     );
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      await fetch(`${API_BASE_URL}/api/v1/notifications/${id}/read`, {
+        method: "PATCH",
+        headers,
+      });
+    } catch (e) {
+      console.warn(`Failed to sync mark-read for ${id}:`, e);
+    }
   };
 
   const navItems = [
@@ -192,7 +284,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
           <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setIsNotificationsOpen((prev) => !prev)}
-              className={`relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 transition-all ${
+              className={`relative flex h-9 w-9 sm:h-9 sm:w-9 min-h-[38px] min-w-[38px] items-center justify-center rounded-xl border transition-all ${
                 isNotificationsOpen
                   ? "bg-indigo-50 border-indigo-300 text-indigo-600 shadow-xs"
                   : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 shadow-2xs"
@@ -201,17 +293,18 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
               aria-expanded={isNotificationsOpen}
             >
               <Bell className="h-4 w-4" />
+              {/* Dynamic Red Notification Badge over Bell icon: Hidden if count is 0 */}
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-white animate-pulse">
-                  {unreadCount}
+                  {unreadCount > 9 ? "9+" : unreadCount}
                 </span>
               )}
             </button>
 
-            {/* Absolute Positioned Dropdown Menu */}
+            {/* Mobile-Responsive Dropdown Menu */}
             {isNotificationsOpen && (
               <div 
-                className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:right-0 sm:mt-2 sm:w-96 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
                 role="menu"
                 aria-orientation="vertical"
               >
@@ -222,15 +315,15 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                       Notifications
                     </h4>
                     {unreadCount > 0 && (
-                      <span className="rounded-full bg-indigo-100 text-indigo-700 px-2 py-0.5 text-[10px] font-bold">
-                        {unreadCount} new
+                      <span className="rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[10px] font-bold">
+                        {unreadCount} unread
                       </span>
                     )}
                   </div>
                   {unreadCount > 0 && (
                     <button
                       onClick={markAllAsRead}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
                     >
                       <CheckCheck className="h-3.5 w-3.5" />
                       <span>Mark all as read</span>
@@ -239,7 +332,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                 </div>
 
                 {/* Notification Items List */}
-                <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                <div className="max-h-80 sm:max-h-96 overflow-y-auto divide-y divide-slate-100">
                   {notifications.length === 0 ? (
                     <div className="p-6 text-center text-xs text-slate-400">
                       No notifications at this time
@@ -268,7 +361,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                           key={item.id}
                           onClick={() => markAsRead(item.id)}
                           className={`p-3.5 text-left transition-colors cursor-pointer hover:bg-slate-50 flex items-start gap-3 ${
-                            item.unread ? "bg-indigo-50/30" : "bg-white"
+                            !item.is_read ? "bg-indigo-50/40" : "bg-white"
                           }`}
                         >
                           <div
@@ -278,7 +371,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-1">
-                              <p className={`text-xs truncate ${item.unread ? "font-bold text-slate-900" : "font-medium text-slate-700"}`}>
+                              <p className={`text-xs truncate ${!item.is_read ? "font-bold text-slate-900" : "font-medium text-slate-700"}`}>
                                 {item.title}
                               </p>
                               <span className="text-[10px] text-slate-400 shrink-0">
@@ -289,8 +382,8 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                               {item.description}
                             </p>
                           </div>
-                          {item.unread && (
-                            <span className="mt-1 h-2 w-2 rounded-full bg-indigo-600 shrink-0" />
+                          {!item.is_read && (
+                            <span className="mt-1 h-2 w-2 rounded-full bg-rose-500 shrink-0 ring-2 ring-rose-100" />
                           )}
                         </div>
                       );
@@ -299,10 +392,9 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
                 </div>
 
                 {/* Dropdown Footer */}
-                <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-2 text-center">
-                  <span className="text-[11px] font-medium text-slate-500">
-                    Deterministic Academic Telemetry
-                  </span>
+                <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <span className="font-medium">Live Telemetry Alerts</span>
+                  <span>{notifications.length} total</span>
                 </div>
               </div>
             )}
@@ -311,7 +403,7 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
           {/* AI Assistant Drawer Trigger Button */}
           <button
             onClick={() => setIsAiDrawerOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-indigo-600 to-violet-600 px-3 py-2 text-xs font-semibold text-white hover:from-indigo-700 hover:to-violet-700 transition-all shadow-xs shadow-indigo-200 active:scale-98"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-indigo-600 to-violet-600 px-3 py-2 text-xs font-semibold text-white hover:from-indigo-700 hover:to-violet-700 transition-all shadow-xs shadow-indigo-200 active:scale-98 min-h-[38px]"
             aria-label="Open AI Assistant Drawer"
             title="Open AI Assistant"
           >

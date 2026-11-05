@@ -50,13 +50,13 @@ export default function ChatMessageBubble({
 
   return (
     <div
-      className={`flex items-start gap-2.5 sm:gap-3 ${
+      className={`flex items-start gap-2 sm:gap-3 ${
         isUser ? "flex-row-reverse" : "flex-row"
       }`}
     >
       {/* Avatar */}
       <div
-        className={`flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-xl text-xs font-bold transition-all ${
+        className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 select-none items-center justify-center rounded-xl text-xs font-bold transition-all ${
           isUser
             ? "bg-indigo-600 text-white shadow-xs shadow-indigo-300"
             : message.isError
@@ -65,23 +65,23 @@ export default function ChatMessageBubble({
         }`}
       >
         {isUser ? (
-          <User className="h-4 w-4" />
+          <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         ) : message.isError ? (
-          <AlertCircle className="h-4 w-4" />
+          <AlertCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         ) : (
-          <Bot className="h-4 w-4" />
+          <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         )}
       </div>
 
-      {/* Message Content Container */}
+      {/* Message Content Container: Responsive width, zero horizontal scrolling */}
       <div
-        className={`max-w-[85%] sm:max-w-[82%] space-y-2 ${
+        className={`max-w-[88%] sm:max-w-[82%] space-y-1.5 sm:space-y-2 min-w-0 ${
           isUser ? "items-end text-right" : "items-start text-left"
         }`}
       >
         {/* Main Bubble */}
         <div
-          className={`rounded-2xl px-4 py-3 text-xs sm:text-sm leading-relaxed shadow-xs transition-all ${
+          className={`rounded-2xl px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-xs transition-all break-words [overflow-wrap:anywhere] overflow-hidden ${
             isUser
               ? "bg-indigo-600 text-white rounded-tr-xs"
               : message.isError
@@ -90,12 +90,14 @@ export default function ChatMessageBubble({
           }`}
         >
           {/* Text paragraph */}
-          <div className="whitespace-pre-wrap">{message.text}</div>
+          <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">
+            {message.text}
+          </div>
 
           {/* Key Points Section (if returned by backend) */}
           {message.keyPoints && message.keyPoints.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1">
+            <div className="mt-2.5 pt-2.5 sm:mt-3 sm:pt-3 border-t border-slate-100 space-y-1.5">
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1">
                 <Sparkles className="h-3 w-3" />
                 Key Takeaways
               </span>
@@ -103,7 +105,7 @@ export default function ChatMessageBubble({
                 {message.keyPoints.map((point, idx) => (
                   <li key={idx} className="flex items-start gap-1.5">
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                    <span>{point}</span>
+                    <span className="break-words">{point}</span>
                   </li>
                 ))}
               </ul>
@@ -112,14 +114,14 @@ export default function ChatMessageBubble({
 
           {/* Grounded Coursera Recommendations Cards */}
           {message.recommendations && message.recommendations.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+            <div className="mt-2.5 pt-2.5 sm:mt-3 sm:pt-3 border-t border-slate-100 space-y-2">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                <span className="flex items-center gap-1 text-indigo-700 uppercase tracking-wider">
+                <span className="flex items-center gap-1 text-indigo-700 uppercase tracking-wider text-[10px] sm:text-[11px]">
                   <BookOpen className="h-3 w-3" />
-                  Grounded Coursera Courses ({message.recommendations.length})
+                  Coursera Courses ({message.recommendations.length})
                 </span>
-                <span className="text-[10px] text-slate-400 font-normal">
-                  TF-IDF Cosine Match
+                <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
+                  TF-IDF Match
                 </span>
               </div>
 
@@ -134,17 +136,17 @@ export default function ChatMessageBubble({
                   return (
                     <div
                       key={idx}
-                      className="group rounded-xl border border-slate-200/90 bg-slate-50/70 p-2.5 hover:bg-indigo-50/40 hover:border-indigo-200 transition-all text-left"
+                      className="group rounded-xl border border-slate-200/90 bg-slate-50/70 p-2 sm:p-2.5 hover:bg-indigo-50/40 hover:border-indigo-200 transition-all text-left overflow-hidden"
                     >
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-1.5">
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-xs text-slate-900 group-hover:text-indigo-700 line-clamp-1 transition-colors">
+                          <p className="font-semibold text-xs text-slate-900 group-hover:text-indigo-700 line-clamp-2 sm:line-clamp-1 break-words transition-colors">
                             {course["Course Name"]}
                           </p>
                           {university && (
-                            <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5 flex items-center gap-1">
+                            <p className="text-[10px] sm:text-[11px] text-slate-500 line-clamp-1 mt-0.5 flex items-center gap-1">
                               <GraduationCap className="h-3 w-3 text-slate-400 shrink-0" />
-                              <span>{university}</span>
+                              <span className="truncate">{university}</span>
                             </p>
                           )}
                         </div>
@@ -153,7 +155,7 @@ export default function ChatMessageBubble({
                             href={url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 shadow-2xs transition-all shrink-0"
+                            className="inline-flex h-7 w-7 sm:h-6 sm:w-6 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 shadow-2xs transition-all shrink-0 min-h-[28px] min-w-[28px]"
                             title="Open course on Coursera"
                           >
                             <ExternalLink className="h-3 w-3" />
@@ -161,7 +163,7 @@ export default function ChatMessageBubble({
                         )}
                       </div>
 
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+                      <div className="mt-2 flex flex-wrap items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px]">
                         {difficulty && (
                           <span className="rounded-md bg-white border border-slate-200 px-1.5 py-0.5 font-medium text-slate-600">
                             {difficulty}
@@ -187,11 +189,11 @@ export default function ChatMessageBubble({
 
           {/* Follow-up Suggestion Chip */}
           {message.followUpSuggestion && onSelectSuggestion && (
-            <div className="mt-3 pt-2.5 border-t border-slate-100">
+            <div className="mt-2.5 pt-2 sm:mt-3 sm:pt-2.5 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => onSelectSuggestion(message.followUpSuggestion!)}
-                className="w-full text-left inline-flex items-center justify-between gap-2 rounded-xl bg-indigo-50/80 hover:bg-indigo-100/90 border border-indigo-200 px-3 py-2 text-xs font-medium text-indigo-800 transition-all group"
+                className="w-full text-left inline-flex items-center justify-between gap-1.5 sm:gap-2 rounded-xl bg-indigo-50/80 hover:bg-indigo-100/90 border border-indigo-200 px-2.5 sm:px-3 py-2 text-xs font-medium text-indigo-800 transition-all group overflow-hidden cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-[10px] uppercase font-bold text-indigo-500 shrink-0">Next:</span>
@@ -204,11 +206,11 @@ export default function ChatMessageBubble({
 
           {/* Retry Button on Error */}
           {message.isError && onRetry && (
-            <div className="mt-2.5 pt-2 border-t border-rose-200/60">
+            <div className="mt-2 pt-2 border-t border-rose-200/60">
               <button
                 type="button"
                 onClick={onRetry}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 hover:text-rose-900 transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 hover:text-rose-900 transition-colors cursor-pointer"
               >
                 <RotateCcw className="h-3 w-3" />
                 <span>Retry Request</span>

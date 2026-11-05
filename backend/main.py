@@ -23,6 +23,7 @@ from routes.tasks import router as tasks_router
 from routes.recommendations import router as recommendations_router
 from routes.resources import router as resources_router
 from routes.analytics import router as analytics_router
+from routes.notifications import router as notifications_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ app.include_router(tasks_router)
 app.include_router(recommendations_router)
 app.include_router(resources_router)
 app.include_router(analytics_router)
+app.include_router(notifications_router)
 
 
 # ============================================================

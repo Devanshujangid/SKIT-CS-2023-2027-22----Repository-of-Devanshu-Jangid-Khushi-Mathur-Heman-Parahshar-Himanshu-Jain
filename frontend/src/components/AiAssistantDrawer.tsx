@@ -7,13 +7,10 @@ import {
   Sparkles, 
   RotateCcw, 
   Bot, 
-  HelpCircle,
-  Lightbulb,
-  Radio,
-  BookOpen
+  Lightbulb
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
-import ChatMessageBubble, { ChatMessage, ChatCourseRecommendation } from "@/components/assistant/ChatMessageBubble";
+import ChatMessageBubble, { ChatMessage } from "@/components/assistant/ChatMessageBubble";
 import ChatInputField from "@/components/assistant/ChatInputField";
 
 interface AiAssistantDrawerProps {
@@ -137,7 +134,7 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
             body: JSON.stringify({ message: query }),
           });
         }
-      } catch (networkErr) {
+      } catch {
         // Fallback endpoint probe
         response = await fetch(`${API_BASE_URL}/api/v1/ai/chat`, {
           method: "POST",
@@ -223,9 +220,9 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         aria-hidden="true"
       />
 
-      {/* Sliding Drawer */}
+      {/* Sliding Drawer: Mobile spans w-full, tablet/desktop fixed sm:w-[400px] md:w-[420px] */}
       <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full sm:w-[460px] md:w-[500px] bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out ${
+        className={`fixed top-0 right-0 z-50 h-full w-full sm:w-[400px] md:w-[420px] max-w-full bg-white shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
         role="dialog"
@@ -233,20 +230,20 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         aria-label="AI Academic Assistant"
       >
         {/* Fixed Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/90 text-white shadow-md shadow-indigo-500/20">
-              <Sparkles className="h-5 w-5" />
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-slate-200 bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-indigo-600/90 text-white shadow-md shadow-indigo-500/20">
+              <Sparkles className="h-4 w-4 sm:h-5 sm:w-5" />
               <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 animate-pulse" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm tracking-tight text-white">Smart AI Assistant</h3>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h3 className="font-bold text-xs sm:text-sm tracking-tight text-white">Smart AI Assistant</h3>
+                <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
                   Live API + Voice
                 </span>
               </div>
-              <p className="text-xs text-slate-300">Wired to POST /api/v1/chat & Speech Recognition</p>
+              <p className="text-[11px] sm:text-xs text-slate-300">Wired to POST /api/v1/chat & Speech</p>
             </div>
           </div>
 
@@ -254,13 +251,13 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
             <button
               onClick={handleReset}
               title="Reset conversation"
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-2 sm:p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               <RotateCcw className="h-4 w-4" />
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-2 sm:p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               aria-label="Close chat"
             >
               <X className="h-5 w-5" />
@@ -268,8 +265,8 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
           </div>
         </div>
 
-        {/* Suggestion Chips */}
-        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
+        {/* Suggestion Chips: horizontally scrollable and touch-friendly */}
+        <div className="px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none touch-pan-x shrink-0">
           <span className="text-[11px] font-semibold text-slate-500 shrink-0 flex items-center gap-1">
             <Lightbulb className="h-3 w-3 text-amber-500" />
             Try:
@@ -279,15 +276,15 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
               key={idx}
               type="button"
               onClick={() => handleSendMessage(item)}
-              className="text-[11px] whitespace-nowrap bg-white hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-2.5 py-1 rounded-full border border-slate-200 hover:border-indigo-200 font-medium transition-colors cursor-pointer"
+              className="text-[11px] whitespace-nowrap bg-white hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-2.5 py-1 rounded-full border border-slate-200 hover:border-indigo-200 font-medium transition-colors cursor-pointer active:scale-95"
             >
               {item}
             </button>
           ))}
         </div>
 
-        {/* Scrollable Message Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+        {/* Scrollable Message Area: No horizontal overflow */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-3 sm:space-y-4 bg-slate-50/50">
           {messages.map((msg) => (
             <ChatMessageBubble
               key={msg.id}
@@ -303,13 +300,13 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-white shadow-2xs">
                 <Bot className="h-4 w-4" />
               </div>
-              <div className="rounded-2xl rounded-tl-xs bg-white border border-slate-200/90 px-4 py-3 shadow-xs">
+              <div className="rounded-2xl rounded-tl-xs bg-white border border-slate-200/90 px-3.5 py-2.5 sm:px-4 sm:py-3 shadow-xs">
                 <div className="flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.3s]" />
                   <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.15s]" />
                   <span className="h-2 w-2 rounded-full bg-indigo-500 animate-bounce" />
-                  <span className="ml-2 text-xs text-slate-400 font-medium">
-                    Consulting Gemini & matching Coursera courses...
+                  <span className="ml-2 text-[11px] sm:text-xs text-slate-400 font-medium">
+                    Consulting Gemini & Coursera catalog...
                   </span>
                 </div>
               </div>
@@ -319,7 +316,7 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         </div>
 
         {/* Bottom Input Area with Connected Voice Transcription */}
-        <div className="p-3.5 border-t border-slate-200 bg-white shrink-0">
+        <div className="p-2.5 sm:p-3.5 border-t border-slate-200 bg-white shrink-0">
           <ChatInputField
             onSendMessage={handleSendMessage}
             isLoading={isLoading}
