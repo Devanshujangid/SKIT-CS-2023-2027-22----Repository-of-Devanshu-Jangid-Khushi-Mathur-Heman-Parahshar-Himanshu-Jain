@@ -124,14 +124,14 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ message: query }),
+          body: JSON.stringify({ message: query, stream: true }),
         });
 
         if (response.status === 404) {
           response = await fetch(`${API_BASE_URL}/api/v1/ai/chat`, {
             method: "POST",
             headers,
-            body: JSON.stringify({ message: query }),
+            body: JSON.stringify({ message: query, stream: true }),
           });
         }
       } catch {
@@ -139,7 +139,7 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         response = await fetch(`${API_BASE_URL}/api/v1/ai/chat`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ message: query }),
+          body: JSON.stringify({ message: query, stream: true }),
         });
       }
 
@@ -148,19 +148,99 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
         throw new Error(errorData.detail || `Server responded with ${response.status}`);
       }
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
 
-      const aiMessage: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        sender: "ai",
-        text: data.explanation || data.message || "Here is the explanation for your topic:",
-        keyPoints: Array.isArray(data.key_points) ? data.key_points : [],
-        followUpSuggestion: data.follow_up_suggestion || undefined,
-        recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
+      if (contentType.includes("text/event-stream") && response.body) {
+        // Real-time token streaming (ChatGPT-style)
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const aiMessageId = `ai-${Date.now()}`;
+        let accumulatedText = "";
 
-      setMessages((prev) => [...prev, aiMessage]);
+        const initialAiMessage: ChatMessage = {
+          id: aiMessageId,
+          sender: "ai",
+          text: "",
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+
+        setMessages((prev) => [...prev, initialAiMessage]);
+        setIsLoading(false);
+
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || "";
+
+          for (const part of parts) {
+            const trimmed = part.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const dataStr = trimmed.replace(/^data:\s*/, "").trim();
+            if (dataStr === "[DONE]") break;
+
+            try {
+              const eventData = JSON.parse(dataStr);
+              if (eventData.type === "content" && eventData.delta) {
+                accumulatedText += eventData.delta;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiMessageId ? { ...msg, text: accumulatedText } : msg
+                  )
+                );
+              } else if (eventData.type === "refusal") {
+                accumulatedText = eventData.refusal_message || "This query falls outside your academic curriculum.";
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiMessageId
+                      ? {
+                          ...msg,
+                          text: accumulatedText,
+                          keyPoints: eventData.suggested_academic_topics || [],
+                        }
+                      : msg
+                  )
+                );
+              } else if (eventData.type === "metadata" && Array.isArray(eventData.recommendations)) {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiMessageId
+                      ? { ...msg, recommendations: eventData.recommendations }
+                      : msg
+                  )
+                );
+              } else if (eventData.type === "error") {
+                accumulatedText = eventData.detail || "Error generating response.";
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiMessageId ? { ...msg, text: accumulatedText, isError: true } : msg
+                  )
+                );
+              }
+            } catch {
+              // Ignore partial JSON parse errors
+            }
+          }
+        }
+      } else {
+        // Standard JSON response fallback
+        const data = await response.json();
+
+        const aiMessage: ChatMessage = {
+          id: `ai-${Date.now()}`,
+          sender: "ai",
+          text: data.explanation || data.message || "Here is the explanation for your topic:",
+          keyPoints: Array.isArray(data.key_points) ? data.key_points : [],
+          followUpSuggestion: data.follow_up_suggestion || undefined,
+          recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+
+        setMessages((prev) => [...prev, aiMessage]);
+      }
     } catch (err: unknown) {
       console.warn("API chat request failed, generating contextual fallback:", err);
 

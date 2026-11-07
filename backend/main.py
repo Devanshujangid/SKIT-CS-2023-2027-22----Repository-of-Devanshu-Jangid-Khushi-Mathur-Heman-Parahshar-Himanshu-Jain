@@ -76,7 +76,11 @@ async def chat_direct_alias(
     payload: ChatRequest,
     user_data: dict = Depends(verify_clerk_token),
 ):
-    """Direct endpoint for POST /api/v1/chat delegating to ai_chat."""
+    """
+    Direct endpoint for POST /api/v1/chat.
+    Streams AI Assistant tokens in real-time using Server-Sent Events (SSE) by default (stream=True).
+    Supports fallback to full JSON when stream=False.
+    """
     return await ai_chat(payload, user_data)
 
 

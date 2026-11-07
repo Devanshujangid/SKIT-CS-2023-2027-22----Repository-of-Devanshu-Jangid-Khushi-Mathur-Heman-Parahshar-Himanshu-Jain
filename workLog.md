@@ -771,6 +771,79 @@ The implementation is ready to be committed and pushed.
 10. Executed full unit test suite with 10/10 test cases passing in 0.014s (100% success rate).
 
 
+## Task – Real-time Streaming AI Chat Endpoint (POST /api/v1/chat) (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Analyzed the latency bottleneck of the synchronous AI chat endpoint where clients waited up to 10 seconds for large monolithic JSON payloads.
+2. Designed a Server-Sent Events (SSE) streaming architecture using `fastapi.responses.StreamingResponse` (`media_type="text/event-stream"`).
+3. Updated `ChatRequest` schema in `backend/routes/ai.py` to support `stream: Optional[bool] = True` allowing real-time token streaming while retaining backwards compatibility for non-streaming callers (`stream=False`).
+4. Created streaming engine in `backend/services/chat_stream_service.py` implementing `stream_chat_response(...)`:
+   - Validates user queries against academic syllabus scope using `check_academic_scope(...)`.
+   - Emits structured refusal payloads (`{"type": "refusal", ...}`) if non-academic queries are submitted, bypassing Gemini API invocation.
+   - Configures Google GenAI SDK client with `client.models.generate_content_stream(...)` to stream response tokens.
+   - Wraps synchronous generator execution inside `starlette.concurrency.run_in_threadpool` for non-blocking FastAPI async generator consumption.
+   - Emits real-time token deltas: `data: {"type": "content", "delta": "..."}\n\n`.
+   - Asynchronously queries the TF-IDF recommendation engine for grounded Coursera courses after token streaming finishes.
+   - Emits resource metadata event: `data: {"type": "metadata", "recommendations": [...]}\n\n`.
+   - Emits completion signal: `data: [DONE]\n\n`.
+   - Catches quota and network exceptions gracefully, emitting error events (`data: {"type": "error", "detail": "..."}\n\n`).
+5. Implemented streaming integration in `backend/routes/ai.py:ai_chat`:
+   - Returns `StreamingResponse` with `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` headers when `stream=True`.
+   - Retains full JSON structured fallback when `stream=False`.
+6. Wired direct alias endpoint `POST /api/v1/chat` in `backend/main.py` delegating to `ai_chat`.
+7. Upgraded frontend client `frontend/src/components/AiAssistantDrawer.tsx`:
+   - Configured request payload with `stream: true`.
+   - Integrated `response.body.getReader()` with `TextDecoder` to parse the SSE stream in real-time.
+   - Dynamically updates `messages` state chunk-by-chunk for instant typewriter feedback (like ChatGPT).
+   - Handles metadata chunks to populate Coursera course recommendations and refusal alerts.
+   - Preserves offline resilient fallback for network drops.
+8. Created comprehensive unit test suite in `backend/tests/test_chat_streaming.py`:
+   - Validated `ChatRequest` validation and default stream flag.
+   - Validated token delta SSE emissions and `[DONE]` termination.
+   - Validated academic guardrail refusal event generation without calling Gemini.
+   - Validated error event emission on API exceptions.
+   - Validated `StreamingResponse` instantiation and headers.
+   - Validated prompt length validation.
+9. Executed full test suite: **45 / 45 unit tests passed (100% success rate in 0.15s)**.
+
+
+## Task – Automated Notification Engine & Scheduled Dispatch (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and engineered the automated Notification Engine subsystem in `backend/services/notification_engine.py`:
+   - **Unresolved Weak Topics Detection**: Evaluates student's active study plan using deterministic `WeakTopicsService` / `compute_weak_topics(...)`. Flags sessions with study deficits (>15m) or low completion rates (<50%), formulating actionable intervention alerts with type `"weak_topic"`.
+   - **Upcoming Exams Detection**: Inspects `monthly_milestones` and scheduled uncompleted `tasks` within the next 7 days for exam keywords (`exam`, `midterm`, `test`, `quiz`, `assessment`, `gate`, `final`, `evaluation`). Formulates reminder alerts with type `"exam"`.
+   - **Idempotent Deduplication (`is_duplicate`)**: Checks existing notifications for identical subject/milestone titles within a 24-hour lookback window or if an unread alert already exists, preventing alert fatigue and duplicate spam.
+2. Implemented batch and single-student dispatch orchestrators:
+   - `dispatch_for_student(user_id, db, dry_run)`: Dispatches alerts for a specific student with safe database insertion.
+   - `run_daily_notification_dispatch(db, dry_run)`: Evaluates all registered students and aggregates dispatch telemetry (students evaluated, alerts created, duration).
+3. Created standalone executable cron job script `backend/cron/daily_notification_job.py`:
+   - Configured CLI interface with `--dry-run` and `--user-id` options.
+   - Enabled deployment via standard OS cron (`crontab -e`), Windows Task Scheduler, Docker containers, or CI/CD pipelines.
+4. Added FastAPI trigger endpoint `POST /api/v1/notifications/dispatch-daily` in `backend/routes/notifications.py`:
+   - Allows students to trigger on-demand evaluation of their own alerts.
+   - Supports batch dispatch across all registered students restricted to administrators (`role == 'admin'`).
+   - Supports dry-run simulation mode.
+5. Created Supabase database migration and stored procedure `backend/migration/notification_engine_cron.sql`:
+   - Created PostgreSQL function `public.dispatch_daily_exam_and_weak_topic_alerts()` running directly in database engine.
+   - Documented native `pg_cron` daily schedule command (`0 8 * * *`).
+6. Created Supabase Edge Function `supabase/functions/daily-notifications/index.ts`:
+   - Built Deno/TypeScript edge worker connecting via Supabase service-role key.
+   - Triggers `dispatch_daily_exam_and_weak_topic_alerts` RPC with structured JSON responses.
+7. Created comprehensive automated unit test suite in `backend/tests/test_notification_engine.py`:
+   - Validated detection of unresolved weak topics from study plan sessions.
+   - Validated detection of upcoming exams from monthly milestones and scheduled tasks.
+   - Validated 24-hour and unread deduplication logic.
+   - Validated dry-run isolation preventing database writes.
+   - Validated batch dispatch across student roster.
+   - Validated endpoint permissions (student targeted dispatch, 403 rejection on unauthorized batch, 200 admin approval).
+8. Executed test suite: **54 / 54 unit tests passed (100% success rate in 0.16s)**.
+
+
+
+
 
 
 

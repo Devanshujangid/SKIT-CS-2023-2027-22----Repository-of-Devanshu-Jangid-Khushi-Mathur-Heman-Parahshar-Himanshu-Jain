@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from auth import verify_clerk_token
 from database import get_db, get_or_create_user
+from services.notification_engine import notification_engine
 from schemas.notifications import (
     NotificationBulkReadResponse,
     NotificationCreateRequest,
@@ -331,3 +332,50 @@ async def delete_notification(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete notification",
         ) from exc
+
+
+# ============================================================
+# POST /api/v1/notifications/dispatch-daily
+# ============================================================
+
+@router.post("/dispatch-daily")
+async def trigger_daily_notification_dispatch(
+    dry_run: bool = Query(False, description="Simulate evaluation without inserting rows"),
+    batch: bool = Query(False, description="Run batch dispatch for all students (admin only) or current student"),
+    user_data: dict = Depends(verify_clerk_token),
+):
+    """
+    Automated Notification Engine trigger.
+    Evaluates 'Upcoming Exams' and 'Unresolved Weak Topics'.
+    Pushes deterministic study alerts into the notifications table.
+    """
+    try:
+        db = get_db()
+        user_id = get_authenticated_user_id(user_data)
+        role = user_data.get("role", "student")
+
+        if batch:
+            if role != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Batch evaluation across all students requires admin role.",
+                )
+            result = notification_engine.run_daily_notification_dispatch(db=db, dry_run=dry_run)
+            return result
+
+        result = notification_engine.dispatch_for_student(user_id=user_id, db=db, dry_run=dry_run)
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "result": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to execute daily notification dispatch")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to execute notification dispatch",
+        ) from exc
+
