@@ -49,3 +49,23 @@ class NotificationBulkReadResponse(BaseModel):
     success: bool = True
     updated_count: int = Field(..., ge=0)
     message: str = "Notifications marked as read"
+
+
+class AdminBroadcastNotificationRequest(BaseModel):
+    """Payload for administrators to push system-wide or targeted alerts."""
+    title: str = Field(..., min_length=2, max_length=255, description="Broadcast header/title")
+    message: str = Field(..., min_length=5, max_length=2000, description="Broadcast announcement body")
+    type: str = Field(default="system", max_length=50, description="Category: system, alert, exam, announcement")
+    target_role: Optional[str] = Field(default="student", description="Target role: student, all")
+    target_user_ids: Optional[List[str]] = Field(default=None, description="Optional specific student UUIDs to target")
+
+
+class AdminBroadcastNotificationResponse(BaseModel):
+    """Response after broadcasting an admin notification."""
+    success: bool = True
+    message: str
+    recipient_count: int
+    title: str
+    type: str
+    timestamp: datetime
+

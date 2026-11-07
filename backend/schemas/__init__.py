@@ -17,6 +17,8 @@ from schemas.notifications import (
     NotificationListResponse,
     NotificationStatusUpdateResponse,
     NotificationBulkReadResponse,
+    AdminBroadcastNotificationRequest,
+    AdminBroadcastNotificationResponse,
 )
 
 from schemas.assistant_tools import (
@@ -54,6 +56,8 @@ __all__ = [
     "NotificationListResponse",
     "NotificationStatusUpdateResponse",
     "NotificationBulkReadResponse",
+    "AdminBroadcastNotificationRequest",
+    "AdminBroadcastNotificationResponse",
     # Assistant Tool & System Action Schemas
     "SystemActionType",
     "PriorityFilter",
