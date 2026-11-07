@@ -808,6 +808,41 @@ The implementation is ready to be committed and pushed.
 9. Executed full test suite: **45 / 45 unit tests passed (100% success rate in 0.15s)**.
 
 
+## Task – Automated Notification Engine & Scheduled Dispatch (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and engineered the automated Notification Engine subsystem in `backend/services/notification_engine.py`:
+   - **Unresolved Weak Topics Detection**: Evaluates student's active study plan using deterministic `WeakTopicsService` / `compute_weak_topics(...)`. Flags sessions with study deficits (>15m) or low completion rates (<50%), formulating actionable intervention alerts with type `"weak_topic"`.
+   - **Upcoming Exams Detection**: Inspects `monthly_milestones` and scheduled uncompleted `tasks` within the next 7 days for exam keywords (`exam`, `midterm`, `test`, `quiz`, `assessment`, `gate`, `final`, `evaluation`). Formulates reminder alerts with type `"exam"`.
+   - **Idempotent Deduplication (`is_duplicate`)**: Checks existing notifications for identical subject/milestone titles within a 24-hour lookback window or if an unread alert already exists, preventing alert fatigue and duplicate spam.
+2. Implemented batch and single-student dispatch orchestrators:
+   - `dispatch_for_student(user_id, db, dry_run)`: Dispatches alerts for a specific student with safe database insertion.
+   - `run_daily_notification_dispatch(db, dry_run)`: Evaluates all registered students and aggregates dispatch telemetry (students evaluated, alerts created, duration).
+3. Created standalone executable cron job script `backend/cron/daily_notification_job.py`:
+   - Configured CLI interface with `--dry-run` and `--user-id` options.
+   - Enabled deployment via standard OS cron (`crontab -e`), Windows Task Scheduler, Docker containers, or CI/CD pipelines.
+4. Added FastAPI trigger endpoint `POST /api/v1/notifications/dispatch-daily` in `backend/routes/notifications.py`:
+   - Allows students to trigger on-demand evaluation of their own alerts.
+   - Supports batch dispatch across all registered students restricted to administrators (`role == 'admin'`).
+   - Supports dry-run simulation mode.
+5. Created Supabase database migration and stored procedure `backend/migration/notification_engine_cron.sql`:
+   - Created PostgreSQL function `public.dispatch_daily_exam_and_weak_topic_alerts()` running directly in database engine.
+   - Documented native `pg_cron` daily schedule command (`0 8 * * *`).
+6. Created Supabase Edge Function `supabase/functions/daily-notifications/index.ts`:
+   - Built Deno/TypeScript edge worker connecting via Supabase service-role key.
+   - Triggers `dispatch_daily_exam_and_weak_topic_alerts` RPC with structured JSON responses.
+7. Created comprehensive automated unit test suite in `backend/tests/test_notification_engine.py`:
+   - Validated detection of unresolved weak topics from study plan sessions.
+   - Validated detection of upcoming exams from monthly milestones and scheduled tasks.
+   - Validated 24-hour and unread deduplication logic.
+   - Validated dry-run isolation preventing database writes.
+   - Validated batch dispatch across student roster.
+   - Validated endpoint permissions (student targeted dispatch, 403 rejection on unauthorized batch, 200 admin approval).
+8. Executed test suite: **54 / 54 unit tests passed (100% success rate in 0.16s)**.
+
+
+
 
 
 

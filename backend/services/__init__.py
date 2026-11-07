@@ -9,6 +9,10 @@ from services.assistant_guardrail import (
     ACADEMIC_EXEMPTION_PATTERNS,
     ACADEMIC_INTENT_PATTERNS,
 )
+from services.notification_engine import (
+    NotificationEngine,
+    notification_engine,
+)
 
 __all__ = [
     "GuardrailCheckResult",
@@ -16,4 +20,6 @@ __all__ = [
     "NON_ACADEMIC_DOMAIN_PATTERNS",
     "ACADEMIC_EXEMPTION_PATTERNS",
     "ACADEMIC_INTENT_PATTERNS",
+    "NotificationEngine",
+    "notification_engine",
 ]

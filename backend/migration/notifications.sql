@@ -111,3 +111,4 @@ USING (
           AND users.clerk_id = (SELECT auth.jwt() ->> 'sub')
     )
 );
+
