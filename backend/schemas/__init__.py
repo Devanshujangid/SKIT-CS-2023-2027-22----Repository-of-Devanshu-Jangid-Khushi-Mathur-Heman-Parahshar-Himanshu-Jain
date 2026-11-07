@@ -11,6 +11,14 @@ from schemas.settings import (
     SettingsResponseSchema,
 )
 
+from schemas.notifications import (
+    NotificationCreateRequest,
+    NotificationResponse,
+    NotificationListResponse,
+    NotificationStatusUpdateResponse,
+    NotificationBulkReadResponse,
+)
+
 from schemas.assistant_tools import (
     SystemActionType,
     PriorityFilter,
@@ -38,6 +46,12 @@ __all__ = [
     "NotificationSettingsSchema",
     "SettingsUpdateRequest",
     "SettingsResponseSchema",
+    # Notification Schemas
+    "NotificationCreateRequest",
+    "NotificationResponse",
+    "NotificationListResponse",
+    "NotificationStatusUpdateResponse",
+    "NotificationBulkReadResponse",
     # Assistant Tool & System Action Schemas
     "SystemActionType",
     "PriorityFilter",
