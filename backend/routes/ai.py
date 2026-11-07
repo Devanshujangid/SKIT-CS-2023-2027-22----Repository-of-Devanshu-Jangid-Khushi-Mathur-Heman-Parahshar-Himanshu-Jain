@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from google import genai
@@ -16,6 +17,7 @@ from google.genai import types
 from starlette.concurrency import run_in_threadpool
 from services.recommendation_service import recommendation_service
 from services.assistant_guardrail import check_academic_scope
+from services.chat_stream_service import stream_chat_response
 
 from database import (
     get_db,
@@ -66,6 +68,10 @@ class ChatRequest(BaseModel):
         min_length=2,
         max_length=2000,
         description="Student's question or learning topic.",
+    )
+    stream: Optional[bool] = Field(
+        default=True,
+        description="Whether to stream response tokens in real-time via Server-Sent Events (SSE).",
     )
 
 
@@ -817,9 +823,22 @@ async def ai_chat(
 
     try:
         logger.info(
-            "AI chat request received for user: %s",
+            "AI chat request received for user: %s (stream=%s)",
             clerk_id,
+            payload.stream,
         )
+
+        # Real-time streaming response (SSE)
+        if payload.stream:
+            return StreamingResponse(
+                stream_chat_response(message=message, clerk_id=clerk_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
         # ------------------------------------------------------------------
         # Academic Syllabus Guardrail Check (Refuse non-academic queries)
