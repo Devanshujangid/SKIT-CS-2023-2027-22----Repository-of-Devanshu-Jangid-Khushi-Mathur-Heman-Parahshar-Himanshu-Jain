@@ -5,10 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from auth import verify_clerk_token
+from auth import require_admin, verify_clerk_token
 from database import get_db, get_or_create_user
 from services.notification_engine import notification_engine
 from schemas.notifications import (
+    AdminBroadcastNotificationRequest,
+    AdminBroadcastNotificationResponse,
     NotificationBulkReadResponse,
     NotificationCreateRequest,
     NotificationListResponse,
@@ -378,4 +380,138 @@ async def trigger_daily_notification_dispatch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to execute notification dispatch",
         ) from exc
+
+
+# ============================================================
+# POST /api/v1/notifications/admin/broadcast
+# ============================================================
+
+@router.post(
+    "/admin/broadcast",
+    response_model=AdminBroadcastNotificationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_broadcast_notification(
+    payload: AdminBroadcastNotificationRequest,
+    admin_payload: dict = Depends(require_admin),
+):
+    """
+    Push manual system-wide or cohort-targeted alerts to students.
+    Enforces strict Role-Based Access Control (RBAC): restricted to 'admin'.
+    """
+    admin_sub = admin_payload.get("sub")
+    logger.info("Admin %s initiating manual notification broadcast: '%s'", admin_sub, payload.title)
+
+    try:
+        db = get_db()
+
+        # 1. Resolve target student recipients
+        if payload.target_user_ids:
+            query = db.table("users").select("id, email, clerk_id, role")
+            # Filter targeted user UUIDs
+            users_res = query.in_("id", payload.target_user_ids).execute()
+        elif payload.target_role == "all":
+            users_res = db.table("users").select("id, email, clerk_id, role").execute()
+        else:
+            # Default: all students
+            users_res = db.table("users").select("id, email, clerk_id, role").eq("role", "student").execute()
+
+        target_users = users_res.data or []
+        if not target_users:
+            # Fallback: if no users with explicit role='student' exist, broadcast to all users
+            all_users_res = db.table("users").select("id, email, clerk_id, role").execute()
+            target_users = all_users_res.data or []
+
+        if not target_users:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No eligible student recipients found to receive broadcast",
+            )
+
+        # 2. Build notification rows
+        now = datetime.now(timezone.utc).isoformat()
+        clean_title = payload.title.strip()
+        clean_message = payload.message.strip()
+        clean_type = payload.type.strip().lower() if payload.type else "system"
+
+        rows = [
+            {
+                "user_id": str(u["id"]),
+                "type": clean_type,
+                "title": clean_title,
+                "message": clean_message,
+                "is_read": False,
+                "created_at": now,
+            }
+            for u in target_users
+        ]
+
+        # 3. Batch insert notifications
+        insert_res = db.table("notifications").insert(rows).execute()
+        inserted_rows = insert_res.data or rows
+
+        logger.info(
+            "Admin broadcast successful: '%s' sent to %d student(s)",
+            clean_title,
+            len(inserted_rows),
+        )
+
+        return {
+            "success": True,
+            "message": f"Successfully broadcast notification to {len(inserted_rows)} student(s)",
+            "recipient_count": len(inserted_rows),
+            "title": clean_title,
+            "type": clean_type,
+            "timestamp": now,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to broadcast admin notification")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to broadcast notification",
+        ) from exc
+
+
+# ============================================================
+# GET /api/v1/notifications/admin/broadcasts
+# ============================================================
+
+@router.get("/admin/broadcasts")
+async def get_admin_recent_broadcasts(
+    limit: int = Query(20, ge=1, le=100),
+    admin_payload: dict = Depends(require_admin),
+):
+    """
+    Retrieve recently broadcast notifications for admin dashboard monitoring.
+    Restricted to 'admin' role.
+    """
+    try:
+        db = get_db()
+        result = (
+            db.table("notifications")
+            .select("id, type, title, message, created_at, is_read, user_id")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        items = result.data or []
+        return {
+            "success": True,
+            "count": len(items),
+            "broadcasts": items,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to fetch recent admin broadcasts")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch broadcast history",
+        ) from exc
+
 

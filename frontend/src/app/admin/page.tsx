@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { API_BASE_URL } from "@/lib/api";
 import {
   Users,
@@ -22,6 +23,8 @@ import {
   Layers,
   ShieldCheck,
   Wifi,
+  Send,
+  Megaphone,
 } from "lucide-react";
 
 // Student Roster Mock Data
@@ -121,8 +124,17 @@ const AUDIT_EVENTS = [
 ];
 
 export default function AdminOverviewPage() {
+  const { getToken } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
+
+  // Send Manual Notification Form State
+  const [broadcastTitle, setBroadcastTitle] = useState("");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcastType, setBroadcastType] = useState<"system" | "alert" | "exam" | "announcement">("system");
+  const [targetAudience, setTargetAudience] = useState<"student" | "all">("student");
+  const [isSubmittingBroadcast, setIsSubmittingBroadcast] = useState(false);
+  const [broadcastStatus, setBroadcastStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   // Live health and system telemetry states
   const [backendHealth, setBackendHealth] = useState<{ status: string; latencyMs: number } | null>(null);
@@ -158,6 +170,56 @@ export default function AdminOverviewPage() {
   useEffect(() => {
     fetchHealthAndSummary();
   }, [fetchHealthAndSummary]);
+
+  const handleSendBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) return;
+
+    setIsSubmittingBroadcast(true);
+    setBroadcastStatus(null);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/notifications/admin/broadcast`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: broadcastTitle.trim(),
+          message: broadcastMessage.trim(),
+          type: broadcastType,
+          target_role: targetAudience,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setBroadcastStatus({
+        type: "success",
+        message: data.message || "Manual notification successfully broadcast to all students!",
+      });
+      setBroadcastTitle("");
+      setBroadcastMessage("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to broadcast notification";
+      setBroadcastStatus({
+        type: "error",
+        message: msg,
+      });
+    } finally {
+      setIsSubmittingBroadcast(false);
+    }
+  };
 
   const filteredStudents = STUDENT_ROSTER.filter((s) => {
     const matchesSearch =
@@ -385,6 +447,141 @@ export default function AdminOverviewPage() {
           </div>
         </div>
 
+      </div>
+
+      {/* Send Manual Notification to Students Form */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-950 p-6 sm:p-8 shadow-md space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <Megaphone className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Send Manual Notification</h2>
+              <p className="text-xs text-slate-400">
+                Push real-time system alerts, exam announcements, or advisory notices across all enrolled student cohorts
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-900 border border-slate-800 text-slate-300">
+            <ShieldCheck className="h-3.5 w-3.5 text-indigo-400" />
+            Admin RBAC Enforced
+          </span>
+        </div>
+
+        {broadcastStatus && (
+          <div
+            className={`p-4 rounded-2xl border text-xs flex items-center justify-between ${
+              broadcastStatus.type === "success"
+                ? "bg-emerald-950/70 border-emerald-800/80 text-emerald-300"
+                : "bg-rose-950/70 border-rose-800/80 text-rose-300"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {broadcastStatus.type === "success" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
+              )}
+              <span>{broadcastStatus.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBroadcastStatus(null)}
+              className="text-slate-400 hover:text-white text-xs font-bold px-2 py-0.5 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <form onSubmit={handleSendBroadcast} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Title */}
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">Alert Title / Subject</label>
+              <input
+                type="text"
+                placeholder="e.g. Midterm Assessment Timetable Finalized"
+                value={broadcastTitle}
+                onChange={(e) => setBroadcastTitle(e.target.value)}
+                required
+                maxLength={255}
+                className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+
+            {/* Category */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">Notification Type</label>
+              <select
+                value={broadcastType}
+                onChange={(e) => setBroadcastType(e.target.value as "system" | "alert" | "exam" | "announcement")}
+                className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 outline-none focus:border-indigo-500 cursor-pointer"
+              >
+                <option value="system">System Announcement</option>
+                <option value="alert">Critical Alert</option>
+                <option value="exam">Upcoming Exam / Quiz</option>
+                <option value="announcement">Curriculum Update</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Message Body */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-300">Notification Message Body</label>
+              <span className="text-[11px] text-slate-500">{broadcastMessage.length} / 2000 chars</span>
+            </div>
+            <textarea
+              rows={3}
+              placeholder="Enter announcement text to display in student notification drawers..."
+              value={broadcastMessage}
+              onChange={(e) => setBroadcastMessage(e.target.value)}
+              required
+              maxLength={2000}
+              className="w-full rounded-xl border border-slate-800 bg-slate-900 p-3 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
+
+          {/* Target Audience & Submit */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-slate-400">Target Cohort:</span>
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="audience"
+                    checked={targetAudience === "student"}
+                    onChange={() => setTargetAudience("student")}
+                    className="accent-indigo-500"
+                  />
+                  All Enrolled Students
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="audience"
+                    checked={targetAudience === "all"}
+                    onChange={() => setTargetAudience("all")}
+                    className="accent-indigo-500"
+                  />
+                  Entire Institution (All Roles)
+                </label>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmittingBroadcast || !broadcastTitle.trim() || !broadcastMessage.trim()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-xs font-bold text-white shadow-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send className={`h-3.5 w-3.5 ${isSubmittingBroadcast ? "animate-pulse" : ""}`} />
+              <span>{isSubmittingBroadcast ? "Broadcasting..." : "Send Notification"}</span>
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Student Progress & Roster Table */}

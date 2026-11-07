@@ -25,15 +25,20 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from auth import require_admin
 from routes.notifications import (
+    admin_broadcast_notification,
     create_notification,
     delete_notification,
+    get_admin_recent_broadcasts,
     get_authenticated_user_id,
     get_notifications,
     mark_all_notifications_as_read,
     mark_notification_as_read,
 )
 from schemas.notifications import (
+    AdminBroadcastNotificationRequest,
+    AdminBroadcastNotificationResponse,
     NotificationBulkReadResponse,
     NotificationCreateRequest,
     NotificationListResponse,
@@ -303,6 +308,80 @@ class TestNotificationsEndpoints(unittest.TestCase):
         valid = NotificationCreateRequest(message="Valid notification message", type="achievement")
         self.assertEqual(valid.message, "Valid notification message")
         self.assertEqual(valid.type, "achievement")
+
+    @patch("routes.notifications.get_db")
+    def test_admin_broadcast_notification_success(self, mock_get_db):
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+
+        admin_payload = {"sub": "clerk_admin_123", "role": "admin", "email": "admin@skit.ac.in"}
+        mock_users = [
+            {"id": "11111111-1111-1111-1111-111111111111", "email": "s1@skit.ac.in", "role": "student"},
+            {"id": "22222222-2222-2222-2222-222222222222", "email": "s2@skit.ac.in", "role": "student"},
+        ]
+        mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=mock_users)
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=mock_users)
+
+        req = AdminBroadcastNotificationRequest(
+            title="Campus Server Maintenance Notice",
+            message="Supabase maintenance scheduled tonight from 02:00 to 03:00 UTC.",
+            type="system",
+        )
+        res = run_async(admin_broadcast_notification(payload=req, admin_payload=admin_payload))
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["recipient_count"], 2)
+        self.assertEqual(res["title"], "Campus Server Maintenance Notice")
+        self.assertEqual(res["type"], "system")
+        mock_db.table.return_value.insert.assert_called_once()
+
+    @patch("routes.notifications.get_db")
+    def test_admin_broadcast_notification_targeted_ids(self, mock_get_db):
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+
+        admin_payload = {"sub": "clerk_admin_123", "role": "admin", "email": "admin@skit.ac.in"}
+        target_id = "11111111-1111-1111-1111-111111111111"
+        mock_users = [{"id": target_id, "email": "s1@skit.ac.in", "role": "student"}]
+        mock_db.table.return_value.select.return_value.in_.return_value.execute.return_value = MagicMock(data=mock_users)
+        mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=mock_users)
+
+        req = AdminBroadcastNotificationRequest(
+            title="Individual Review Alert",
+            message="Please visit the faculty cabin for your project review.",
+            type="alert",
+            target_user_ids=[target_id],
+        )
+        res = run_async(admin_broadcast_notification(payload=req, admin_payload=admin_payload))
+
+        self.assertTrue(res["success"])
+        self.assertEqual(res["recipient_count"], 1)
+
+    @patch("routes.notifications.get_db")
+    def test_get_admin_recent_broadcasts(self, mock_get_db):
+        mock_db = MagicMock()
+        mock_get_db.return_value = mock_db
+
+        admin_payload = {"sub": "clerk_admin_123", "role": "admin"}
+        mock_items = [
+            {"id": "n1", "title": "Midterm Update", "message": "Exam date confirmed", "type": "exam"}
+        ]
+        mock_db.table.return_value.select.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=mock_items
+        )
+
+        res = run_async(get_admin_recent_broadcasts(limit=10, admin_payload=admin_payload))
+        self.assertTrue(res["success"])
+        self.assertEqual(res["count"], 1)
+        self.assertEqual(res["broadcasts"][0]["title"], "Midterm Update")
+
+    def test_student_rejected_from_admin_broadcast(self):
+        checker = require_admin
+        student_payload = {"sub": "clerk_student_123", "role": "student"}
+        with self.assertRaises(HTTPException) as ctx:
+            run_async(checker(token_payload=student_payload))
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertIn("Access forbidden", ctx.exception.detail)
 
 
 if __name__ == "__main__":
