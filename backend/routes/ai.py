@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 from starlette.concurrency import run_in_threadpool
 from services.recommendation_service import recommendation_service
+from services.assistant_guardrail import check_academic_scope
 
 from database import (
     get_db,
@@ -819,6 +820,28 @@ async def ai_chat(
             "AI chat request received for user: %s",
             clerk_id,
         )
+
+        # ------------------------------------------------------------------
+        # Academic Syllabus Guardrail Check (Refuse non-academic queries)
+        # ------------------------------------------------------------------
+        # Fast path check immediately refuses obvious non-academic domains
+        guardrail_result = check_academic_scope(query=message)
+        if not guardrail_result.is_academic:
+            logger.info(
+                "Non-academic query refused for user %s: %s (reason: %s)",
+                clerk_id,
+                message,
+                guardrail_result.refusal_reason,
+            )
+            return {
+                "success": False,
+                "is_refused": True,
+                "refusal_reason": guardrail_result.refusal_reason,
+                "refusal_message": guardrail_result.refusal_message,
+                "suggested_academic_topics": guardrail_result.suggested_academic_topics,
+                "recommendations": [],
+                "recommendation_count": 0,
+            }
 
         # Generate the topic explanation using existing Gemini logic.
         user_prompt = f"""
