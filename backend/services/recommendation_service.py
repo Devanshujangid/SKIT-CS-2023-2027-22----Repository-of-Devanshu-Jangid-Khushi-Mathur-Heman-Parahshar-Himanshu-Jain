@@ -1,13 +1,17 @@
+
+import csv
 import logging
 from pathlib import Path
-import csv
 
 import joblib
+
+from database import get_db
 
 try:
     import pandas as pd
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
+
     SKLEARN_AVAILABLE = True
 except ImportError:
     pd = None
@@ -15,10 +19,9 @@ except ImportError:
     cosine_similarity = None
     SKLEARN_AVAILABLE = False
 
+
 logger = logging.getLogger(__name__)
 
-
-# Locate the CSV and cache directory from the repository root.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CACHE_DIR = PROJECT_ROOT / "backend" / ".cache"
 CACHE_PATH = CACHE_DIR / "coursera_tfidf.joblib"
@@ -34,61 +37,221 @@ REQUIRED_COLUMNS = [
     "Course URL",
 ]
 
+ADMIN_RESOURCE_COLUMNS = (
+    "id,title,description,url,category,subject,tags,is_active"
+)
+
+SIMILARITY_THRESHOLD = 0.10
+
 
 class RecommendationService:
+
     def __init__(self):
         if not DATASET_PATH.is_file():
             raise FileNotFoundError(
                 f"Recommendation dataset not found: {DATASET_PATH}"
             )
 
-        stat = DATASET_PATH.stat()
-        fingerprint = {
-            "size": stat.st_size,
-            "mtime_ns": stat.st_mtime_ns,
-        }
+        self.courses = []
+        self.admin_resources = []
+        self.df = None
+        self.tfidf = None
+        self.tfidf_matrix = None
+        self._resource_signature = None
 
-        if not SKLEARN_AVAILABLE:
-            self.courses = []
-            try:
-                with open(DATASET_PATH, mode="r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        self.courses.append(row)
-                logger.info("Loaded Coursera dataset with standard parser (%d courses)", len(self.courses))
-            except Exception:
-                logger.warning("Failed to parse Coursera.csv in fallback mode", exc_info=True)
-            return
+        self._load_coursera_dataset()
+        self._refresh_index(self.admin_resources)
 
-        if CACHE_PATH.is_file():
-            try:
-                cached = joblib.load(CACHE_PATH)
+    def _load_coursera_dataset(self):
+        """Load the existing Coursera dataset."""
 
-                if cached.get("fingerprint") == fingerprint:
-                    self.df = cached["df"]
-                    self.tfidf = cached["tfidf"]
-                    self.tfidf_matrix = cached["tfidf_matrix"]
-                    logger.info("Loaded recommendation artifacts from cache")
-                    return
+        if SKLEARN_AVAILABLE:
+            self.df = pd.read_csv(DATASET_PATH)
 
-            except Exception:
-                logger.warning(
-                    "Recommendation cache is invalid; rebuilding it",
-                    exc_info=True,
+            missing = set(REQUIRED_COLUMNS) - set(self.df.columns)
+
+            if missing:
+                raise ValueError(
+                    f"Coursera.csv is missing columns: {sorted(missing)}"
                 )
 
-        self.df = pd.read_csv(DATASET_PATH)
+            for _, row in self.df.iterrows():
+                self.courses.append({
+                    "id": None,
+                    "course_name": str(row["Course Name"] or ""),
+                    "description": str(
+                        row["Course Description"]
+                        if pd.notna(row["Course Description"])
+                        else ""
+                    ),
+                    "skills": str(
+                        row["Skills"]
+                        if pd.notna(row["Skills"])
+                        else ""
+                    ),
+                    "university": (
+                        None if pd.isna(row["University"])
+                        else str(row["University"])
+                    ),
+                    "difficulty_level": (
+                        None if pd.isna(row["Difficulty Level"])
+                        else str(row["Difficulty Level"])
+                    ),
+                    "course_rating": self._parse_rating(
+                        row["Course Rating"]
+                    ),
+                    "course_url": (
+                        None if pd.isna(row["Course URL"])
+                        else str(row["Course URL"])
+                    ),
+                    "category": None,
+                    "subject": None,
+                    "source": "coursera",
+                })
 
-        missing = set(REQUIRED_COLUMNS) - set(self.df.columns)
-        if missing:
-            raise ValueError(
-                f"Coursera.csv is missing columns: {sorted(missing)}"
+        else:
+            with open(
+                DATASET_PATH,
+                mode="r",
+                encoding="utf-8",
+            ) as file:
+                reader = csv.DictReader(file)
+
+                for row in reader:
+                    self.courses.append({
+                        "id": None,
+                        "course_name": row.get("Course Name", ""),
+                        "description": row.get(
+                            "Course Description", ""
+                        ),
+                        "skills": row.get("Skills", ""),
+                        "university": row.get("University"),
+                        "difficulty_level": row.get(
+                            "Difficulty Level"
+                        ),
+                        "course_rating": self._parse_rating(
+                            row.get("Course Rating")
+                        ),
+                        "course_url": row.get("Course URL"),
+                        "category": None,
+                        "subject": None,
+                        "source": "coursera",
+                    })
+
+        logger.info(
+            "Loaded %d Coursera resources",
+            len(self.courses),
+        )
+
+    @staticmethod
+    def _parse_rating(value):
+        try:
+            if value is None or str(value).strip() == "":
+                return None
+
+            return float(value)
+
+        except (ValueError, TypeError):
+            return None
+
+    def _fetch_admin_resources(self):
+        """Fetch active Admin resources from Supabase."""
+
+        try:
+            db = get_db()
+
+            if db is None:
+                logger.warning(
+                    "Supabase is unavailable. Using Coursera resources only."
+                )
+                return []
+
+            response = (
+                db.table("learning_resources")
+                .select(ADMIN_RESOURCE_COLUMNS)
+                .eq("is_active", True)
+                .execute()
             )
 
-        self.df["combined_features"] = (
-            self.df["Course Name"].fillna("").astype(str) + " "
-            + self.df["Course Description"].fillna("").astype(str) + " "
-            + self.df["Skills"].fillna("").astype(str)
+            resources = []
+
+            for item in response.data or []:
+                resources.append({
+                    "id": str(item.get("id", "")),
+                    "course_name": str(item.get("title") or ""),
+                    "description": str(
+                        item.get("description") or ""
+                    ),
+                    "skills": " ".join(
+                        item.get("tags") or []
+                    ),
+                    "university": None,
+                    "difficulty_level": None,
+                    "course_rating": None,
+                    "course_url": item.get("url"),
+                    "category": item.get("category"),
+                    "subject": item.get("subject"),
+                    "source": "admin",
+                })
+
+            logger.info(
+                "Fetched %d active Admin resources",
+                len(resources),
+            )
+
+            return resources
+
+        except Exception:
+            logger.warning(
+                "Unable to fetch Admin resources. "
+                "Continuing with Coursera dataset.",
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def _build_features(resource):
+        return " ".join([
+            str(resource.get("course_name") or ""),
+            str(resource.get("description") or ""),
+            str(resource.get("skills") or ""),
+            str(resource.get("category") or ""),
+            str(resource.get("subject") or ""),
+        ]).strip()
+
+    def _refresh_index(self, admin_resources):
+        """Rebuild the unified TF-IDF index when catalog changes."""
+
+        resources = self.courses + admin_resources
+
+        signature = tuple(
+            (
+                item.get("id"),
+                item.get("course_name"),
+                item.get("description"),
+                item.get("skills"),
+                item.get("course_url"),
+                item.get("category"),
+                item.get("subject"),
+                item.get("source"),
+            )
+            for item in resources
+        )
+
+        if signature == self._resource_signature:
+            return
+
+        self.admin_resources = admin_resources
+
+        if not SKLEARN_AVAILABLE:
+            self._resource_signature = signature
+            return
+
+        self.df = pd.DataFrame(resources)
+
+        self.df["combined_features"] = self.df.apply(
+            self._build_features,
+            axis=1,
         )
 
         self.tfidf = TfidfVectorizer(
@@ -96,67 +259,70 @@ class RecommendationService:
             max_features=5000,
         )
 
-        self.tfidf_matrix = self.tfidf.fit_transform(
-            self.df["combined_features"]
+        try:
+            self.tfidf_matrix = self.tfidf.fit_transform(
+                self.df["combined_features"]
+            )
+
+        except ValueError:
+            logger.warning(
+                "No valid vocabulary found in resource catalog."
+            )
+            self.tfidf_matrix = None
+
+        self._resource_signature = signature
+
+        logger.info(
+            "Unified TF-IDF index refreshed: %d resources",
+            len(resources),
         )
 
-        try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            joblib.dump(
-                {
-                    "fingerprint": fingerprint,
-                    "df": self.df,
-                    "tfidf": self.tfidf,
-                    "tfidf_matrix": self.tfidf_matrix,
-                },
-                CACHE_PATH,
-            )
-            logger.info("Built and saved recommendation cache")
-        except Exception:
-            logger.warning("Failed to save recommendation cache to disk", exc_info=True)
+    def recommend_courses(
+        self,
+        query: str,
+        top_n: int = 5,
+    ) -> list:
+        """Recommend relevant Coursera and active Admin resources."""
 
-    def recommend_courses(self, query: str, top_n: int = 5) -> list:
-        """Return relevant courses or an empty list when no match exists."""
         if not isinstance(query, str) or not query.strip():
             return []
 
-        if not isinstance(top_n, int) or top_n < 1:
+        if (
+            not isinstance(top_n, int)
+            or isinstance(top_n, bool)
+            or top_n < 1
+        ):
             return []
 
-        if not SKLEARN_AVAILABLE:
-            query_words = [w for w in query.lower().split() if len(w) > 2]
-            matches = []
-            for course in getattr(self, "courses", []):
-                text = (f"{course.get('Course Name', '')} {course.get('Course Description', '')} {course.get('Skills', '')}").lower()
-                matched_count = sum(1 for w in query_words if w in text)
-                if matched_count > 0:
-                    score = min(1.0, 0.25 + (matched_count * 0.12))
-                    try:
-                        rating = float(course.get("Course Rating", 0))
-                    except (ValueError, TypeError):
-                        rating = None
-                    matches.append({
-                        "course_name": str(course.get("Course Name", "")),
-                        "university": str(course.get("University", "")),
-                        "difficulty_level": str(course.get("Difficulty Level", "")),
-                        "course_rating": rating,
-                        "course_url": str(course.get("Course URL", "")),
-                        "similarity_score": round(score, 4),
-                    })
-            matches.sort(key=lambda x: x["similarity_score"], reverse=True)
-            return matches[:top_n]
+        # Fetch current Admin resources before searching.
+        admin_resources = self._fetch_admin_resources()
 
+        # Rebuild index only when resource data changes.
+        self._refresh_index(admin_resources)
+
+        if not SKLEARN_AVAILABLE:
+            return self._keyword_recommendations(
+                query,
+                top_n,
+            )
+
+        if self.tfidf_matrix is None or self.df.empty:
+            return []
 
         try:
-            query_vector = self.tfidf.transform([query.strip()])
+            query_vector = self.tfidf.transform([
+                query.strip()
+            ])
 
             scores = cosine_similarity(
                 query_vector,
                 self.tfidf_matrix,
             ).flatten()
 
-            # No relevant course found.
-            if len(scores) == 0 or scores.max() < 0.10:
+            if (
+                len(scores) == 0
+                or scores.max() < SIMILARITY_THRESHOLD
+            ):
                 return []
 
             ranked_indices = scores.argsort()[::-1]
@@ -165,38 +331,24 @@ class RecommendationService:
             for index in ranked_indices:
                 score = float(scores[index])
 
-                # Skip courses with very low similarity.
-                if score < 0.10:
+                if score < SIMILARITY_THRESHOLD:
                     break
 
-                course = self.df.iloc[index]
-                rating_value = course["Course Rating"]
-
-                # Handle ratings such as "Not Calibrated".
-                try:
-                    rating = (
-                        None if pd.isna(rating_value)
-                        else float(rating_value)
-                    )
-                except (TypeError, ValueError):
-                    rating = None
+                resource = self.df.iloc[index]
 
                 recommendations.append({
-                    "course_name": str(course["Course Name"]),
-                    "university": (
-                        None if pd.isna(course["University"])
-                        else str(course["University"])
-                    ),
-                    "difficulty_level": (
-                        None if pd.isna(course["Difficulty Level"])
-                        else str(course["Difficulty Level"])
-                    ),
-                    "course_rating": rating,
-                    "course_url": (
-                        None if pd.isna(course["Course URL"])
-                        else str(course["Course URL"])
-                    ),
-                    "similarity_score": score,
+                    "course_name": resource["course_name"],
+                    "university": resource["university"],
+                    "difficulty_level": resource[
+                        "difficulty_level"
+                    ],
+                    "course_rating": resource["course_rating"],
+                    "course_url": resource["course_url"],
+                    "similarity_score": round(score, 4),
+                    "source": resource["source"],
+                    "resource_id": resource["id"],
+                    "category": resource["category"],
+                    "subject": resource["subject"],
                 })
 
                 if len(recommendations) >= top_n:
@@ -207,6 +359,61 @@ class RecommendationService:
         except Exception:
             logger.exception("Recommendation engine failed")
             raise
+
+    def _keyword_recommendations(
+        self,
+        query: str,
+        top_n: int,
+    ) -> list:
+        """Fallback keyword-based search without scikit-learn."""
+
+        query_words = [
+            word
+            for word in query.lower().split()
+            if len(word) > 2
+        ]
+
+        matches = []
+
+        resources = self.courses + self.admin_resources
+
+        for resource in resources:
+            text = self._build_features(resource).lower()
+
+            matched_count = sum(
+                1 for word in query_words
+                if word in text
+            )
+
+            if matched_count == 0:
+                continue
+
+            score = min(
+                1.0,
+                0.25 + matched_count * 0.12,
+            )
+
+            matches.append({
+                "course_name": resource["course_name"],
+                "university": resource["university"],
+                "difficulty_level": resource[
+                    "difficulty_level"
+                ],
+                "course_rating": resource["course_rating"],
+                "course_url": resource["course_url"],
+                "similarity_score": round(score, 4),
+                "source": resource["source"],
+                "resource_id": resource["id"],
+                "category": resource["category"],
+                "subject": resource["subject"],
+            })
+
+        matches.sort(
+            key=lambda item: item["similarity_score"],
+            reverse=True,
+        )
+
+        return matches[:top_n]
 
 
 # Reuse one initialized service throughout this process.

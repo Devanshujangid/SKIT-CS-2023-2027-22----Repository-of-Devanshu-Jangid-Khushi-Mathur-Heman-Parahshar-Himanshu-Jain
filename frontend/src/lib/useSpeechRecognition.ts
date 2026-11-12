@@ -108,19 +108,32 @@ export function useSpeechRecognition(): SpeechRecognitionResult {
     recognition.lang = "en-IN";
 
     recognition.onresult = (event) => {
-      let currentTranscript = "";
+  let currentTranscript = "";
 
-      for (let i = 0; i < event.results.length; i++) {
-        currentTranscript +=
-          event.results[i][0].transcript + " ";
-      }
+  for (let i = 0; i < event.results.length; i++) {
+    const result = event.results[i];
+    const spokenText = result[0]?.transcript?.trim();
 
-       const normalizedTranscript = normalizeTechnicalTerms(
-    currentTranscript.trim()
-  );
+    if (spokenText) {
+      currentTranscript += spokenText + " ";
+    }
+  }
 
-      setTranscript(normalizedTranscript);
-    };
+  const cleanedTranscript = currentTranscript
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Ignore empty or noise-only recognition results.
+  if (!cleanedTranscript) {
+    return;
+  }
+
+  const normalizedTranscript =
+    normalizeTechnicalTerms(cleanedTranscript);
+
+  setTranscript(normalizedTranscript);
+  setError(null);
+};
 
     recognition.onerror = (event) => {
       const errorMessages: Record<string, string> = {

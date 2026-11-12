@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { 
   X, 
@@ -12,6 +13,7 @@ import {
 import { API_BASE_URL } from "@/lib/api";
 import ChatMessageBubble, { ChatMessage } from "@/components/assistant/ChatMessageBubble";
 import ChatInputField from "@/components/assistant/ChatInputField";
+import { detectAssistantVoiceCommand } from "@/lib/assistantVoiceCommands";
 
 interface AiAssistantDrawerProps {
   isOpen: boolean;
@@ -96,15 +98,32 @@ export default function AiAssistantDrawer({ isOpen, onClose }: AiAssistantDrawer
     const query = messageText.trim();
     if (!query) return;
 
-    const userMessageId = `user-${Date.now()}`;
-    const userMessage: ChatMessage = {
-      id: userMessageId,
-      sender: "user",
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
+    // Sprint 9: Voice Assistant navigation commands
+const detectedCommand = detectAssistantVoiceCommand(query);
 
-    setMessages((prev) => [...prev, userMessage]);
+let commandResponse: string | null = null;
+
+if (detectedCommand === "leaderboard") {
+  commandResponse =
+    "Your leaderboard rank is currently unavailable. I don't have verified leaderboard data yet, so I won't guess your rank.";
+} else if (detectedCommand === "goal") {
+  commandResponse =
+    "Your academic goals are saved in your profile, but I don't have verified goal achievement data yet. I cannot confirm whether your goal has been achieved.";
+}
+    if (commandResponse) {
+  const assistantMessage: ChatMessage = {
+    id: `ai-command-${Date.now()}`,
+    sender: "ai",
+    text: commandResponse,
+    timestamp: new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
+
+  setMessages((prev) => [...prev, assistantMessage]);
+  return;
+}
     setIsLoading(true);
     setPendingSuggestion("");
 
