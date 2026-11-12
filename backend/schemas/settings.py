@@ -126,6 +126,10 @@ class AcademicGoalsUpdateSchema(BaseModel):
         default_factory=list,
         description="List of currently enrolled subjects"
     )
+    goal_status: Optional[str] = Field(
+        None,
+        description="Goal progression status: 'ahead', 'on_track', 'behind', 'completed', 'paused'"
+    )
 
     @field_validator("goals", mode="before")
     @classmethod

@@ -236,6 +236,7 @@ def update_student_profile_with_reevaluation(
     goals: Optional[Union[str, List[str]]] = None,
     subjects: Optional[List[str]] = None,
     enforce_strict_ceiling: bool = True,
+    goal_status: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes profile update with automated schedule re-evaluation check against active study plan.
@@ -295,6 +296,13 @@ def update_student_profile_with_reevaluation(
         profile_payload["subjects"] = subjects
     elif "subjects" in prev_profile:
         profile_payload["subjects"] = prev_profile["subjects"]
+
+    if goal_status is not None:
+        profile_payload["goal_status"] = goal_status
+    elif "goal_status" in prev_profile:
+        profile_payload["goal_status"] = prev_profile["goal_status"]
+    else:
+        profile_payload["goal_status"] = "on_track"
 
     saved_profile_res = (
         db.table("student_profiles")
