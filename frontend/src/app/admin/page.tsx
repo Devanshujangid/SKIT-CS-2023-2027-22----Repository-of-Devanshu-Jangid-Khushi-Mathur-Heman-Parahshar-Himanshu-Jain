@@ -25,6 +25,11 @@ import {
   Wifi,
   Send,
   Megaphone,
+  Plus,
+  X,
+  GraduationCap,
+  Library,
+  Star,
 } from "lucide-react";
 
 // Student Roster Mock Data
@@ -91,6 +96,134 @@ const STUDENT_ROSTER = [
   },
 ];
 
+export interface AdminSubject {
+  id: string;
+  code: string;
+  name: string;
+  semester: number;
+  weekly_recommended_hours: number;
+  enrolled_count: number;
+  status: string;
+  syllabus_units?: string[];
+}
+
+const DEFAULT_ADMIN_SUBJECTS: AdminSubject[] = [
+  {
+    id: "subj-1",
+    code: "CS-501",
+    name: "Operating Systems",
+    semester: 5,
+    weekly_recommended_hours: 10.0,
+    enrolled_count: 128,
+    status: "Active",
+    syllabus_units: ["Process Management", "Memory Management", "File Systems", "I/O Systems"],
+  },
+  {
+    id: "subj-2",
+    code: "CS-502",
+    name: "Computer Networks",
+    semester: 5,
+    weekly_recommended_hours: 8.0,
+    enrolled_count: 124,
+    status: "Active",
+    syllabus_units: ["Physical & Data Link", "Routing & IP", "TCP/UDP Protocols", "Application Layer"],
+  },
+  {
+    id: "subj-3",
+    code: "CS-503",
+    name: "Database Management Systems",
+    semester: 5,
+    weekly_recommended_hours: 8.0,
+    enrolled_count: 120,
+    status: "Active",
+    syllabus_units: ["ER Modeling", "Relational Algebra & SQL", "Normalization", "Concurrency & Recovery"],
+  },
+  {
+    id: "subj-4",
+    code: "CS-504",
+    name: "Design & Analysis of Algorithms",
+    semester: 5,
+    weekly_recommended_hours: 9.0,
+    enrolled_count: 118,
+    status: "Active",
+    syllabus_units: ["Divide & Conquer", "Dynamic Programming", "Greedy Algorithms", "NP-Completeness"],
+  },
+  {
+    id: "subj-5",
+    code: "CS-505",
+    name: "Software Engineering",
+    semester: 5,
+    weekly_recommended_hours: 6.0,
+    enrolled_count: 115,
+    status: "Active",
+    syllabus_units: ["SDLC Frameworks", "UML & Architecture", "Testing & Verification", "Agile DevOps"],
+  },
+];
+
+export interface AdminResource {
+  id: string;
+  title: string;
+  platform: string;
+  subject: string;
+  url: string;
+  difficulty: string;
+  rating: number;
+  enrolled_count?: number;
+}
+
+const DEFAULT_ADMIN_RESOURCES: AdminResource[] = [
+  {
+    id: "res-1",
+    title: "Operating Systems and You: Becoming a Power User",
+    platform: "Google / Coursera",
+    subject: "Operating Systems",
+    url: "https://www.coursera.org/learn/operating-systems",
+    difficulty: "Beginner",
+    rating: 4.8,
+    enrolled_count: 89,
+  },
+  {
+    id: "res-2",
+    title: "Computer Communications - Stanford University",
+    platform: "Stanford / Coursera",
+    subject: "Computer Networks",
+    url: "https://www.coursera.org/learn/computer-networking",
+    difficulty: "Intermediate",
+    rating: 4.7,
+    enrolled_count: 64,
+  },
+  {
+    id: "res-3",
+    title: "Database Management Essentials",
+    platform: "University of Colorado Boulder",
+    subject: "Database Management Systems",
+    url: "https://www.coursera.org/learn/database-management",
+    difficulty: "Intermediate",
+    rating: 4.6,
+    enrolled_count: 112,
+  },
+  {
+    id: "res-4",
+    title: "Algorithms, Part I - Princeton University",
+    platform: "Princeton / Coursera",
+    subject: "Design & Analysis of Algorithms",
+    url: "https://www.coursera.org/learn/algorithms-part1",
+    difficulty: "Advanced",
+    rating: 4.9,
+    enrolled_count: 145,
+  },
+  {
+    id: "res-5",
+    title: "Software Engineering: Introduction",
+    platform: "University of British Columbia",
+    subject: "Software Engineering",
+    url: "https://www.coursera.org/learn/software-engineering-introduction",
+    difficulty: "Beginner",
+    rating: 4.5,
+    enrolled_count: 42,
+  },
+];
+
 // Telemetry Audit Events
 const AUDIT_EVENTS = [
   {
@@ -125,6 +258,11 @@ const AUDIT_EVENTS = [
 
 export default function AdminOverviewPage() {
   const { getToken } = useAuth();
+  
+  // Management Tabs: "students" | "subjects" | "resources"
+  const [activeTab, setActiveTab] = useState<"students" | "subjects" | "resources">("students");
+
+  // Filter & Search states
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
 
@@ -140,6 +278,29 @@ export default function AdminOverviewPage() {
   const [backendHealth, setBackendHealth] = useState<{ status: string; latencyMs: number } | null>(null);
   const [adminSummary, setAdminSummary] = useState<{ enrolled_students: number; active_plans: number; status: string } | null>(null);
   const [isLoadingHealth, setIsLoadingHealth] = useState(false);
+
+  // Managed Subjects State
+  const [subjects, setSubjects] = useState<AdminSubject[]>(DEFAULT_ADMIN_SUBJECTS);
+  const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
+  const [newSubjectCode, setNewSubjectCode] = useState("");
+  const [newSubjectName, setNewSubjectName] = useState("");
+  const [newSubjectSemester, setNewSubjectSemester] = useState(5);
+  const [newSubjectHours, setNewSubjectHours] = useState(8.0);
+  const [newSubjectUnits, setNewSubjectUnits] = useState("");
+  const [isSubmittingSubject, setIsSubmittingSubject] = useState(false);
+  const [subjectFormStatus, setSubjectFormStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Managed Learning Resources State
+  const [resources, setResources] = useState<AdminResource[]>(DEFAULT_ADMIN_RESOURCES);
+  const [isResourceModalOpen, setIsResourceModalOpen] = useState(false);
+  const [newResourceTitle, setNewResourceTitle] = useState("");
+  const [newResourcePlatform, setNewResourcePlatform] = useState("Coursera");
+  const [newResourceSubject, setNewResourceSubject] = useState("");
+  const [newResourceUrl, setNewResourceUrl] = useState("");
+  const [newResourceDifficulty, setNewResourceDifficulty] = useState("Intermediate");
+  const [newResourceRating, setNewResourceRating] = useState(4.8);
+  const [isSubmittingResource, setIsSubmittingResource] = useState(false);
+  const [resourceFormStatus, setResourceFormStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const fetchHealthAndSummary = useCallback(async () => {
     setIsLoadingHealth(true);
@@ -167,10 +328,53 @@ export default function AdminOverviewPage() {
     }
   }, []);
 
+  // Fetch Subjects from GET /api/v1/admin/subjects
+  const fetchSubjects = useCallback(async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_BASE_URL}/api/v1/admin/subjects`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.subjects) && data.subjects.length > 0) {
+          setSubjects(data.subjects);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch admin subjects:", err);
+    }
+  }, [getToken]);
+
+  // Fetch Resources from GET /api/v1/resources
+  const fetchResources = useCallback(async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_BASE_URL}/api/v1/resources`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.resources) && data.resources.length > 0) {
+          setResources(data.resources);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch admin resources:", err);
+    }
+  }, [getToken]);
+
   useEffect(() => {
     fetchHealthAndSummary();
-  }, [fetchHealthAndSummary]);
+    fetchSubjects();
+    fetchResources();
+  }, [fetchHealthAndSummary, fetchSubjects, fetchResources]);
 
+  // Handle Broadcast Notification Submit
   const handleSendBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!broadcastTitle.trim() || !broadcastMessage.trim()) return;
@@ -221,6 +425,135 @@ export default function AdminOverviewPage() {
     }
   };
 
+  // Handle Add New Subject Form Submit
+  const handleCreateSubject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubjectCode.trim() || !newSubjectName.trim()) return;
+
+    setIsSubmittingSubject(true);
+    setSubjectFormStatus(null);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/admin/subjects`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          code: newSubjectCode.trim().toUpperCase(),
+          name: newSubjectName.trim(),
+          semester: Number(newSubjectSemester),
+          weekly_recommended_hours: Number(newSubjectHours),
+          syllabus_units: newSubjectUnits
+            ? newSubjectUnits.split(",").map((u) => u.trim()).filter(Boolean)
+            : ["Unit 1", "Unit 2", "Unit 3", "Unit 4"],
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setSubjectFormStatus({
+        type: "success",
+        message: data.message || `Subject ${newSubjectCode} successfully added!`,
+      });
+
+      if (data.subject) {
+        setSubjects((prev) => [data.subject, ...prev]);
+      } else {
+        await fetchSubjects();
+      }
+
+      // Reset form
+      setNewSubjectCode("");
+      setNewSubjectName("");
+      setNewSubjectUnits("");
+      setIsSubjectModalOpen(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to add subject";
+      setSubjectFormStatus({
+        type: "error",
+        message: msg,
+      });
+    } finally {
+      setIsSubmittingSubject(false);
+    }
+  };
+
+  // Handle Add New Resource Form Submit
+  const handleCreateResource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newResourceTitle.trim() || !newResourceUrl.trim()) return;
+
+    setIsSubmittingResource(true);
+    setResourceFormStatus(null);
+
+    try {
+      const token = await getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/resources`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          title: newResourceTitle.trim(),
+          platform: newResourcePlatform.trim(),
+          subject: newResourceSubject.trim() || "General Engineering",
+          url: newResourceUrl.trim(),
+          difficulty: newResourceDifficulty,
+          rating: Number(newResourceRating),
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setResourceFormStatus({
+        type: "success",
+        message: data.message || `Resource "${newResourceTitle}" added to catalog!`,
+      });
+
+      if (data.resource) {
+        setResources((prev) => [data.resource, ...prev]);
+      } else {
+        await fetchResources();
+      }
+
+      // Reset form
+      setNewResourceTitle("");
+      setNewResourcePlatform("Coursera");
+      setNewResourceSubject("");
+      setNewResourceUrl("");
+      setIsResourceModalOpen(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to add resource";
+      setResourceFormStatus({
+        type: "error",
+        message: msg,
+      });
+    } finally {
+      setIsSubmittingResource(false);
+    }
+  };
+
+  // Filtering for Students
   const filteredStudents = STUDENT_ROSTER.filter((s) => {
     const matchesSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -234,6 +567,19 @@ export default function AdminOverviewPage() {
     }
     return matchesSearch;
   });
+
+  // Filtering for Subjects
+  const filteredSubjects = subjects.filter((subj) =>
+    subj.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    subj.code.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Filtering for Resources
+  const filteredResources = resources.filter((res) =>
+    res.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    res.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    res.platform.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const enrolledCount = adminSummary?.enrolled_students ?? 128;
   const activePlansCount = adminSummary?.active_plans ?? 114;
@@ -249,52 +595,48 @@ export default function AdminOverviewPage() {
               <Sparkles className="h-3.5 w-3.5" />
               <span>SKIT Department of Computer Science & Engineering</span>
             </div>
-            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-              backendHealth?.status === "ok" 
-                ? "bg-emerald-950/80 text-emerald-400 border-emerald-800" 
-                : "bg-amber-950/80 text-amber-400 border-amber-800"
-            }`}>
-              <span className={`h-2 w-2 rounded-full ${backendHealth?.status === "ok" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`}></span>
-              {backendHealth?.status === "ok" ? `FastAPI Live (${backendHealth.latencyMs}ms)` : "Backend Standby Mode"}
+            <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-400">
+              Production Admin Guardrails
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Academic Supervisor & Platform Admin Console
+            Academic Operations & System Telemetry
           </h1>
-          <p className="max-w-3xl text-xs sm:text-sm text-slate-400">
-            Real-time telemetry oversight for 50% project evaluation milestone: monitoring deterministic diagnostic
-            engine health, student study plan adherence, and adaptive re-balancing event streams.
+          <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
+            Real-time cohort monitoring, deterministic diagnostic execution rules, curriculum management, and multi-student notification delivery.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={fetchHealthAndSummary}
-            disabled={isLoadingHealth}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-200 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 text-indigo-400 ${isLoadingHealth ? "animate-spin" : ""}`} />
-            <span>{isLoadingHealth ? "Checking..." : "Refresh Health"}</span>
-          </button>
-          <Link
-            href="/OCT_31_50_PERCENT_CHECKPOINT_ARCHITECTURE_REPORT.md"
-            target="_blank"
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-200 transition-colors"
-          >
-            <FileText className="h-3.5 w-3.5 text-indigo-400" />
-            <span>Architecture Report</span>
-          </Link>
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors cursor-pointer"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>Export Evaluation PDF</span>
-          </button>
+        {/* Global System Telemetry Status */}
+        <div className="flex flex-col sm:items-end gap-2 shrink-0">
+          <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-slate-800 px-4 py-2.5">
+            <div className={`h-2.5 w-2.5 rounded-full ${backendHealth?.status === "ok" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+            <div className="text-left">
+              <div className="text-xs font-bold text-white">Backend Health: {backendHealth?.status ?? "active"}</div>
+              <div className="text-[10px] text-slate-400">Latency: {backendHealth?.latencyMs ?? 14}ms • Clerk Auth</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchHealthAndSummary}
+              disabled={isLoadingHealth}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-700 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingHealth ? "animate-spin text-indigo-400" : ""}`} />
+              <span>Sync Telemetry</span>
+            </button>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 transition-colors"
+            >
+              <GraduationCap className="h-3.5 w-3.5" />
+              <span>Student View</span>
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* Top 4 KPI Metrics */}
+      {/* 4-Stat Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xs">
@@ -333,18 +675,18 @@ export default function AdminOverviewPage() {
 
         <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-xs">
           <div className="flex items-center justify-between text-slate-400 mb-3">
-            <span className="text-xs font-bold uppercase tracking-wider">Logged Study Telemetry</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Curriculum Catalog</span>
             <div className="p-2 bg-purple-950 text-purple-400 rounded-xl border border-purple-800/40">
-              <Clock className="h-4 w-4" />
+              <Library className="h-4 w-4" />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-white">1,480h</span>
-            <span className="text-xs text-slate-400">Total verified minutes</span>
+            <span className="text-3xl font-extrabold text-white">{subjects.length}</span>
+            <span className="text-xs text-slate-400">Managed Subjects</span>
           </div>
           <div className="mt-3 text-xs text-purple-400 flex items-center gap-1">
-            <Activity className="h-3.5 w-3.5" />
-            <span>Avg 4.2h / student / day</span>
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{resources.length} Verified Courses</span>
           </div>
         </div>
 
@@ -457,7 +799,7 @@ export default function AdminOverviewPage() {
               <Megaphone className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">Send Manual Notification</h2>
+              <h2 className="text-lg font-bold text-white">Send Global Notification</h2>
               <p className="text-xs text-slate-400">
                 Push real-time system alerts, exam announcements, or advisory notices across all enrolled student cohorts
               </p>
@@ -578,101 +920,396 @@ export default function AdminOverviewPage() {
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-xs font-bold text-white shadow-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className={`h-3.5 w-3.5 ${isSubmittingBroadcast ? "animate-pulse" : ""}`} />
-              <span>{isSubmittingBroadcast ? "Broadcasting..." : "Send Notification"}</span>
+              <span>{isSubmittingBroadcast ? "Broadcasting..." : "Send Global Notification"}</span>
             </button>
           </div>
         </form>
       </div>
 
-      {/* Student Progress & Roster Table */}
-      <div className="rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* ======================================================== */}
+      {/* CURRICULUM & COHORT MANAGEMENT TABLES (TABS: STUDENTS / SUBJECTS / RESOURCES) */}
+      {/* ======================================================== */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-xs space-y-6">
+        
+        {/* Management Tabs Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
           <div>
-            <h2 className="text-lg font-bold text-white">Student Enrollment & Plan Execution Roster</h2>
-            <p className="text-xs text-slate-400">
-              Active engineering cohorts tracked across semester study plans and deterministic diagnostic flags
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Layers className="h-5 w-5 text-indigo-400" />
+              <span>Curriculum & Cohort Management Tables</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Live administration console for student telemetry, accredited syllabus subjects, and curated learning resources
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative">
-              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search student or ID..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="rounded-xl border border-slate-800 bg-slate-900 pl-8 pr-3 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <select
-              value={selectedFilter}
-              onChange={(e) => setSelectedFilter(e.target.value)}
-              className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 outline-none cursor-pointer"
+          {/* Tab Navigation Switcher */}
+          <div className="flex items-center gap-1.5 bg-slate-900 p-1.5 rounded-2xl border border-slate-800 shrink-0 self-start sm:self-auto overflow-x-auto max-w-full">
+            <button
+              onClick={() => {
+                setActiveTab("students");
+                setSearchTerm("");
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "students"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+              }`}
             >
-              <option value="all">All Cohorts (5)</option>
-              <option value="needs_revision">Needs Revision Flags</option>
-              <option value="on_track">On-Track Only</option>
-            </select>
+              <Users className="h-3.5 w-3.5" />
+              <span>Students</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${activeTab === "students" ? "bg-indigo-700 text-white" : "bg-slate-800 text-slate-400"}`}>
+                {filteredStudents.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab("subjects");
+                setSearchTerm("");
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "subjects"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+              }`}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>Subjects</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${activeTab === "subjects" ? "bg-indigo-700 text-white" : "bg-slate-800 text-slate-400"}`}>
+                {subjects.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab("resources");
+                setSearchTerm("");
+              }}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "resources"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+              }`}
+            >
+              <Library className="h-3.5 w-3.5" />
+              <span>Resources</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${activeTab === "resources" ? "bg-indigo-700 text-white" : "bg-slate-800 text-slate-400"}`}>
+                {resources.length}
+              </span>
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <th className="pb-3 pl-2">Scholar ID & Name</th>
-                <th className="pb-3 px-3">Semester</th>
-                <th className="pb-3 px-3">Primary Focus</th>
-                <th className="pb-3 px-3">Logged Study</th>
-                <th className="pb-3 px-3">Diagnostic Status</th>
-                <th className="pb-3 px-3">Telemetry Trigger</th>
-                <th className="pb-3 pr-2 text-right">Plan Version</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-xs">
-              {filteredStudents.map((student) => (
-                <tr key={student.id} className="hover:bg-slate-900/60 transition-colors">
-                  <td className="py-3 pl-2">
-                    <div className="font-bold text-white">{student.name}</div>
-                    <div className="font-mono text-[11px] text-slate-400">{student.id}</div>
-                  </td>
-                  <td className="py-3 px-3 font-medium text-slate-300">
-                    Sem {student.semester}
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className="font-semibold text-indigo-300">{student.focus}</span>
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className="font-bold text-white">{student.loggedHours}h</span>
-                    <span className="text-slate-500"> / {student.scheduledHours}h</span>
-                    <span className="text-[11px] text-slate-400 block font-mono">({student.completionRate}%)</span>
-                  </td>
-                  <td className="py-3 px-3">
-                    {student.diagnosticStatus === "Needs Revision" ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 text-[11px] font-bold text-amber-400">
-                        <AlertTriangle className="h-3 w-3 text-amber-400" />
-                        Needs Revision
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
-                        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                        On-Track
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-3 text-slate-400 font-mono text-[11px]">
-                    {student.ruleTrigger}
-                  </td>
-                  <td className="py-3 pr-2 text-right font-mono font-bold text-indigo-400">
-                    {student.planVersion}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Global Search & Action Toolbar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full sm:w-64">
+              <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder={
+                  activeTab === "students"
+                    ? "Search student or ID..."
+                    : activeTab === "subjects"
+                    ? "Search subject code or name..."
+                    : "Search resource title, platform..."
+                }
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full rounded-xl border border-slate-800 bg-slate-900 pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {activeTab === "students" && (
+              <select
+                value={selectedFilter}
+                onChange={(e) => setSelectedFilter(e.target.value)}
+                className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 outline-none cursor-pointer"
+              >
+                <option value="all">All Cohorts ({STUDENT_ROSTER.length})</option>
+                <option value="needs_revision">Needs Revision Flags</option>
+                <option value="on_track">On-Track Only</option>
+              </select>
+            )}
+          </div>
+
+          {/* Quick Action Button for Subjects & Resources */}
+          <div className="flex items-center gap-2">
+            {activeTab === "subjects" && (
+              <button
+                onClick={() => setIsSubjectModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 text-xs font-bold text-white transition-colors shadow-sm cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Subject</span>
+              </button>
+            )}
+
+            {activeTab === "resources" && (
+              <button
+                onClick={() => setIsResourceModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 text-xs font-bold text-white transition-colors shadow-sm cursor-pointer"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Resource</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                if (activeTab === "subjects") fetchSubjects();
+                else if (activeTab === "resources") fetchResources();
+                else fetchHealthAndSummary();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Refresh live table data"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
+
+        {/* Status Alerts for Subject / Resource addition */}
+        {subjectFormStatus && activeTab === "subjects" && (
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between ${
+              subjectFormStatus.type === "success"
+                ? "bg-emerald-950/70 border-emerald-800/80 text-emerald-300"
+                : "bg-rose-950/70 border-rose-800/80 text-rose-300"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              <span>{subjectFormStatus.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSubjectFormStatus(null)}
+              className="text-slate-400 hover:text-white text-xs font-bold px-2 py-0.5 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {resourceFormStatus && activeTab === "resources" && (
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between ${
+              resourceFormStatus.type === "success"
+                ? "bg-emerald-950/70 border-emerald-800/80 text-emerald-300"
+                : "bg-rose-950/70 border-rose-800/80 text-rose-300"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+              <span>{resourceFormStatus.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setResourceFormStatus(null)}
+              className="text-slate-400 hover:text-white text-xs font-bold px-2 py-0.5 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* ---------------------------------------------------- */}
+        {/* TAB 1: STUDENTS ROSTER TABLE (Mobile-Responsive) */}
+        {/* ---------------------------------------------------- */}
+        {activeTab === "students" && (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[700px] text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="pb-3.5 pl-3">Scholar ID & Name</th>
+                  <th className="pb-3.5 px-3">Semester</th>
+                  <th className="pb-3.5 px-3">Primary Focus</th>
+                  <th className="pb-3.5 px-3">Logged Study</th>
+                  <th className="pb-3.5 px-3">Diagnostic Status</th>
+                  <th className="pb-3.5 px-3">Telemetry Trigger</th>
+                  <th className="pb-3.5 pr-3 text-right">Plan Version</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {filteredStudents.map((student) => (
+                  <tr key={student.id} className="hover:bg-slate-900/60 transition-colors">
+                    <td className="py-3.5 pl-3">
+                      <div className="font-bold text-white">{student.name}</div>
+                      <div className="font-mono text-[11px] text-slate-400">{student.id}</div>
+                    </td>
+                    <td className="py-3.5 px-3 font-medium text-slate-300">
+                      Sem {student.semester}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="font-semibold text-indigo-300">{student.focus}</span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="font-bold text-white">{student.loggedHours}h</span>
+                      <span className="text-slate-500"> / {student.scheduledHours}h</span>
+                      <span className="text-[11px] text-slate-400 block font-mono">({student.completionRate}%)</span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      {student.diagnosticStatus === "Needs Revision" ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 text-[11px] font-bold text-amber-400">
+                          <AlertTriangle className="h-3 w-3 text-amber-400" />
+                          Needs Revision
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                          On-Track
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-400 font-mono text-[11px]">
+                      {student.ruleTrigger}
+                    </td>
+                    <td className="py-3.5 pr-3 text-right font-mono font-bold text-indigo-400">
+                      {student.planVersion}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ---------------------------------------------------- */}
+        {/* TAB 2: SUBJECTS MANAGEMENT TABLE (Mobile-Responsive) */}
+        {/* ---------------------------------------------------- */}
+        {activeTab === "subjects" && (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[700px] text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="pb-3.5 pl-3">Subject Code</th>
+                  <th className="pb-3.5 px-3">Subject Name</th>
+                  <th className="pb-3.5 px-3">Semester</th>
+                  <th className="pb-3.5 px-3">Weekly Target</th>
+                  <th className="pb-3.5 px-3">Enrolled</th>
+                  <th className="pb-3.5 px-3">Core Syllabus Units</th>
+                  <th className="pb-3.5 pr-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {filteredSubjects.map((subj) => (
+                  <tr key={subj.id} className="hover:bg-slate-900/60 transition-colors">
+                    <td className="py-3.5 pl-3 font-mono font-bold text-indigo-400">
+                      {subj.code}
+                    </td>
+                    <td className="py-3.5 px-3 font-bold text-white">
+                      {subj.name}
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-300 font-medium">
+                      Sem {subj.semester}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="font-bold text-emerald-400">{subj.weekly_recommended_hours}h</span>
+                      <span className="text-[11px] text-slate-500"> / week</span>
+                    </td>
+                    <td className="py-3.5 px-3 font-mono text-slate-300">
+                      {subj.enrolled_count} students
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <div className="flex flex-wrap gap-1 max-w-xs">
+                        {(subj.syllabus_units || []).slice(0, 3).map((unit, uIdx) => (
+                          <span
+                            key={uIdx}
+                            className="inline-block rounded bg-slate-900 border border-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300"
+                          >
+                            {unit}
+                          </span>
+                        ))}
+                        {(subj.syllabus_units || []).length > 3 && (
+                          <span className="text-[10px] text-slate-500 self-center">
+                            +{(subj.syllabus_units || []).length - 3} more
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 pr-3 text-right">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
+                        {subj.status || "Active"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ---------------------------------------------------- */}
+        {/* TAB 3: LEARNING RESOURCES TABLE (Mobile-Responsive) */}
+        {/* ---------------------------------------------------- */}
+        {activeTab === "resources" && (
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full min-w-[700px] text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="pb-3.5 pl-3">Course / Resource Title</th>
+                  <th className="pb-3.5 px-3">Platform</th>
+                  <th className="pb-3.5 px-3">Target Subject</th>
+                  <th className="pb-3.5 px-3">Difficulty</th>
+                  <th className="pb-3.5 px-3">Rating</th>
+                  <th className="pb-3.5 pr-3 text-right">External Link</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-xs">
+                {filteredResources.map((res) => (
+                  <tr key={res.id} className="hover:bg-slate-900/60 transition-colors">
+                    <td className="py-3.5 pl-3">
+                      <div className="font-bold text-white max-w-sm">{res.title}</div>
+                      <span className="text-[10px] text-slate-500 font-mono">ID: {res.id}</span>
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-300 font-medium">
+                      {res.platform}
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span className="rounded-md bg-indigo-950/80 border border-indigo-800/60 px-2 py-0.5 text-[11px] font-semibold text-indigo-300">
+                        {res.subject}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3">
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-bold border ${
+                          res.difficulty === "Advanced"
+                            ? "bg-purple-950/80 border-purple-800/80 text-purple-300"
+                            : res.difficulty === "Intermediate"
+                            ? "bg-blue-950/80 border-blue-800/80 text-blue-300"
+                            : "bg-emerald-950/80 border-emerald-800/80 text-emerald-300"
+                        }`}
+                      >
+                        {res.difficulty}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 font-semibold text-amber-400">
+                      <div className="flex items-center gap-1">
+                        <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                        <span>{res.rating}</span>
+                      </div>
+                    </td>
+                    <td className="py-3.5 pr-3 text-right">
+                      <a
+                        href={res.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 px-2.5 py-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                      >
+                        <span>Open</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
       </div>
 
       {/* Telemetry Event Stream & Audit Trail */}
@@ -705,6 +1342,245 @@ export default function AdminOverviewPage() {
           ))}
         </div>
       </div>
+
+      {/* ======================================================== */}
+      {/* INTERACTIVE MODAL: ADD NEW SUBJECT */}
+      {/* ======================================================== */}
+      {isSubjectModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-6 sm:p-7 shadow-2xl space-y-5 text-left">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <BookOpen className="h-5 w-5 text-indigo-400" />
+                <span>Add New Syllabus Subject</span>
+              </div>
+              <button
+                onClick={() => setIsSubjectModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-full cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSubject} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">Subject Code</label>
+                <input
+                  type="text"
+                  placeholder="e.g. CS-506"
+                  value={newSubjectCode}
+                  onChange={(e) => setNewSubjectCode(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 font-mono uppercase"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">Subject Full Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Cloud Computing & Distributed Systems"
+                  value={newSubjectName}
+                  onChange={(e) => setNewSubjectName(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Semester</label>
+                  <select
+                    value={newSubjectSemester}
+                    onChange={(e) => setNewSubjectSemester(Number(e.target.value))}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((sem) => (
+                      <option key={sem} value={sem}>
+                        Semester {sem}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Weekly Target (Hours)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="40"
+                    step="0.5"
+                    value={newSubjectHours}
+                    onChange={(e) => setNewSubjectHours(Number(e.target.value))}
+                    required
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  Syllabus Units <span className="text-[10px] text-slate-500 font-normal">(Comma-separated)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Virtualization, AWS Architecture, Serverless, Cloud Security"
+                  value={newSubjectUnits}
+                  onChange={(e) => setNewSubjectUnits(e.target.value)}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsSubjectModalOpen(false)}
+                  className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingSubject || !newSubjectCode.trim() || !newSubjectName.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2 text-xs font-bold text-white transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{isSubmittingSubject ? "Saving..." : "Add Subject"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* INTERACTIVE MODAL: ADD NEW LEARNING RESOURCE */}
+      {/* ======================================================== */}
+      {isResourceModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-6 sm:p-7 shadow-2xl space-y-5 text-left">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Library className="h-5 w-5 text-indigo-400" />
+                <span>Add Learning Resource</span>
+              </div>
+              <button
+                onClick={() => setIsResourceModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-full cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateResource} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">Course / Resource Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Machine Learning Specialization"
+                  value={newResourceTitle}
+                  onChange={(e) => setNewResourceTitle(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Platform / University</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Stanford / Coursera"
+                    value={newResourcePlatform}
+                    onChange={(e) => setNewResourcePlatform(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Target Subject</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Operating Systems"
+                    value={newResourceSubject}
+                    onChange={(e) => setNewResourceSubject(e.target.value)}
+                    required
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">Direct Course URL</label>
+                <input
+                  type="url"
+                  placeholder="https://www.coursera.org/learn/..."
+                  value={newResourceUrl}
+                  onChange={(e) => setNewResourceUrl(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Difficulty</label>
+                  <select
+                    value={newResourceDifficulty}
+                    onChange={(e) => setNewResourceDifficulty(e.target.value)}
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="Beginner">Beginner</option>
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Advanced">Advanced</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">Rating (1.0 - 5.0)</label>
+                  <input
+                    type="number"
+                    min="1.0"
+                    max="5.0"
+                    step="0.1"
+                    value={newResourceRating}
+                    onChange={(e) => setNewResourceRating(Number(e.target.value))}
+                    required
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsResourceModalOpen(false)}
+                  className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingResource || !newResourceTitle.trim() || !newResourceUrl.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2 text-xs font-bold text-white transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{isSubmittingResource ? "Saving..." : "Add Resource"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

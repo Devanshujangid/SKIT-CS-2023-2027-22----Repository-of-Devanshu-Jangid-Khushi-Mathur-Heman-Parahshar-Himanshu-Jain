@@ -18,6 +18,7 @@ import FocusWeakTopicsWidget, {
 } from "@/components/FocusWeakTopicsWidget";
 import E2EFlowTestModal from "@/components/E2EFlowTestModal";
 import DashboardNav from "@/components/DashboardNav";
+import GoalTrackingModal, { GoalMetrics } from "@/components/GoalTrackingModal";
 import {
   BookOpen,
   Clock,
@@ -493,6 +494,18 @@ export default function DashboardPage() {
   const [isAdaptingPlan, setIsAdaptingPlan] = useState<boolean>(false);
   const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(false);
   const [rebalanceNotification, setRebalanceNotification] = useState<string | null>(null);
+
+  // Goal Tracking Modal & Live Telemetry Metrics State
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState<boolean>(false);
+  const [goalMetrics, setGoalMetrics] = useState<GoalMetrics>({
+    adherenceRate: 88,
+    completionRate: 89,
+    completedHours: 30.8,
+    scheduledHours: 34.5,
+    completedTasksCount: 16,
+    totalTasksCount: 18,
+    missedTasksCount: 0,
+  });
 
   // Synchronized compatibility state alias for subcomponents
   const isRebalancing = isAdaptingPlan;
@@ -1154,6 +1167,38 @@ export default function DashboardPage() {
     deriveClientWeakTopics();
   };
 
+  // Fetch live goal tracking metrics from GET /api/v1/analytics/summary with Clerk JWT
+  const fetchGoalMetrics = async () => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`${API_BASE_URL}/api/v1/analytics/summary`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.overview) {
+          const ov = data.overview;
+          setGoalMetrics({
+            adherenceRate: Number(ov.adherence_rate ?? 0),
+            completionRate: Number(ov.completion_percentage ?? 0),
+            completedHours: Number(ov.total_actual_hours ?? 0),
+            scheduledHours: Number(ov.total_scheduled_hours ?? 0),
+            completedTasksCount: Number(ov.completed_tasks_count ?? 0),
+            totalTasksCount: Number(ov.total_tasks_count ?? 0),
+            missedTasksCount: Number(ov.missed_tasks_count ?? 0),
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch live analytics summary for goal metrics:", err);
+    }
+  };
+
   // Handle clicking "Find Targeted Resources" on a weak topic card
   const handleSelectWeakTopicForRecommendations = async (query: string) => {
     setActiveRecommendationTopic(query);
@@ -1260,6 +1305,7 @@ export default function DashboardPage() {
       fetchRecommendations();
       fetchAdaptiveStatus();
       fetchWeakTopics();
+      fetchGoalMetrics();
     } else {
       // Fallback timer if auth load takes long
       const timer = setTimeout(() => {
@@ -1451,6 +1497,14 @@ export default function DashboardPage() {
             >
               <Sparkles className="h-3.5 w-3.5 text-purple-600" />
               E2E Flow Test
+            </button>
+            <button
+              onClick={() => setIsGoalModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer"
+              title="Track Goal Status & Milestone Alerts"
+            >
+              <Award className="h-3.5 w-3.5 text-amber-600" />
+              <span>Goal Tracking</span>
             </button>
             <Link
               href="/onboarding"
@@ -2066,6 +2120,14 @@ export default function DashboardPage() {
         isOpen={isE2EModalOpen}
         onClose={() => setIsE2EModalOpen(false)}
         onExecuteE2E={handleAdaptPlan}
+      />
+
+      {/* Goal Tracking Milestone & Deficit Modal */}
+      <GoalTrackingModal
+        isOpen={isGoalModalOpen}
+        onClose={() => setIsGoalModalOpen(false)}
+        metrics={goalMetrics}
+        onTriggerRebalance={handleTriggerRebalance}
       />
     </main>
   );
