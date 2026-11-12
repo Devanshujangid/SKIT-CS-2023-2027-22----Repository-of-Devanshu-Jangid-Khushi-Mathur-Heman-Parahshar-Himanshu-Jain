@@ -30,10 +30,14 @@ from routes.analytics import (
     get_student_leaderboard_endpoint,
 )
 from routes.notifications import router as notifications_router
+<<<<<<< HEAD
+from routes.admin import router as admin_router
+=======
 from routes.admin import (
     router as admin_management_router,
     subjects_public_router,
 )
+>>>>>>> origin/main
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -76,8 +80,12 @@ app.include_router(resources_router)
 app.include_router(admin_resources_router)
 app.include_router(analytics_router)
 app.include_router(notifications_router)
+<<<<<<< HEAD
+app.include_router(admin_router)
+=======
 app.include_router(admin_management_router)
 app.include_router(subjects_public_router)
+>>>>>>> origin/main
 
 
 # ============================================================

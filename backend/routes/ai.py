@@ -16,9 +16,18 @@ from google import genai
 from google.genai import types
 from starlette.concurrency import run_in_threadpool
 from services.recommendation_service import recommendation_service
+<<<<<<< HEAD
+from services.assistant_guardrail import check_academic_scope, check_context_window_safety
+from prompts.assistant import (
+    MODULE_2_ASSISTANT_BASE_INSTRUCTION,
+    build_conversational_context_prompt,
+)
+
+=======
 from services.assistant_guardrail import check_academic_scope
 from services.chat_stream_service import stream_chat_response
 from services.student_context import get_student_context
+>>>>>>> origin/main
 from database import (
     get_db,
     get_or_create_user,
@@ -69,9 +78,19 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="Student's question or learning topic.",
     )
+<<<<<<< HEAD
+    goal_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional goal evaluation telemetry (target_study_hours, studied_hours, status).",
+    )
+    rank_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional leaderboard standing telemetry (rank, xp_score, streak_days, primary_focus).",
+=======
     stream: Optional[bool] = Field(
         default=True,
         description="Whether to stream response tokens in real-time via Server-Sent Events (SSE).",
+>>>>>>> origin/main
     )
 
 
@@ -841,10 +860,14 @@ async def ai_chat(
             )
 
         # ------------------------------------------------------------------
-        # Academic Syllabus Guardrail Check (Refuse non-academic queries)
+        # Academic Syllabus & Context-Window Guardrail Check
         # ------------------------------------------------------------------
-        # Fast path check immediately refuses obvious non-academic domains
-        guardrail_result = check_academic_scope(query=message)
+        # Validates both the message and any injected goal/rank telemetry
+        guardrail_result = check_context_window_safety(
+            query=message,
+            goal_context=payload.goal_context,
+            rank_context=payload.rank_context,
+        )
         if not guardrail_result.is_academic:
             logger.info(
                 "Non-academic query refused for user %s: %s (reason: %s)",
@@ -867,6 +890,20 @@ async def ai_chat(
             clerk_id,
         )
 
+<<<<<<< HEAD
+        # Build isolated, sanitized prompt with optional goal/rank telemetry
+        user_prompt = build_conversational_context_prompt(
+            student_question=message,
+            goal_context=payload.goal_context,
+            rank_context=payload.rank_context,
+        )
+
+        system_instruction = (
+            f"{MODULE_2_ASSISTANT_BASE_INSTRUCTION}\n"
+            "Explain academic concepts, study goals, and syllabus progress in clear, student-friendly language.\n"
+            "Return valid JSON only."
+        )
+=======
         context_json = json.dumps(
             student_context,
             ensure_ascii=False,
@@ -905,6 +942,7 @@ async def ai_chat(
         Use accurate information and practical examples.
         Return valid JSON only.
         """
+>>>>>>> origin/main
 
         response_text = generate_gemini_response(
             prompt=user_prompt,
