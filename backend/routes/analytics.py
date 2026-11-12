@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from auth import require_admin, require_student
 from database import get_db
@@ -310,6 +311,210 @@ async def get_admin_roster_analytics(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve student roster",
         ) from exc
+
+
+# ============================================================
+# SUBJECT MANAGEMENT MODELS & ENDPOINTS (ADMIN)
+# ============================================================
+
+_MANAGED_SUBJECTS = [
+    {
+        "id": "subj-1",
+        "code": "CS-501",
+        "name": "Operating Systems",
+        "semester": 5,
+        "weekly_recommended_hours": 10.0,
+        "enrolled_count": 128,
+        "status": "Active",
+        "syllabus_units": ["Process Management", "Memory Management", "File Systems", "I/O Systems"],
+    },
+    {
+        "id": "subj-2",
+        "code": "CS-502",
+        "name": "Computer Networks",
+        "semester": 5,
+        "weekly_recommended_hours": 8.0,
+        "enrolled_count": 124,
+        "status": "Active",
+        "syllabus_units": ["Physical & Data Link", "Network Layer & Routing", "Transport Layer (TCP/UDP)", "Application Layer"],
+    },
+    {
+        "id": "subj-3",
+        "code": "CS-503",
+        "name": "Database Management Systems",
+        "semester": 5,
+        "weekly_recommended_hours": 8.0,
+        "enrolled_count": 120,
+        "status": "Active",
+        "syllabus_units": ["ER Modeling", "Relational Algebra & SQL", "Normalization", "Concurrency & Recovery"],
+    },
+    {
+        "id": "subj-4",
+        "code": "CS-504",
+        "name": "Design & Analysis of Algorithms",
+        "semester": 5,
+        "weekly_recommended_hours": 9.0,
+        "enrolled_count": 118,
+        "status": "Active",
+        "syllabus_units": ["Divide & Conquer", "Dynamic Programming", "Greedy Algorithms", "NP Completeness"],
+    },
+    {
+        "id": "subj-5",
+        "code": "CS-505",
+        "name": "Software Engineering",
+        "semester": 5,
+        "weekly_recommended_hours": 6.0,
+        "enrolled_count": 115,
+        "status": "Active",
+        "syllabus_units": ["SDLC Models", "Requirements & UML", "Testing & QA", "Agile & DevOps"],
+    },
+]
+
+
+class SubjectCreateRequest(BaseModel):
+    code: str = Field(..., min_length=2, max_length=20, description="Subject Code (e.g. CS-501)")
+    name: str = Field(..., min_length=2, max_length=150, description="Full Subject Name")
+    semester: int = Field(default=5, ge=1, le=8, description="Semester number")
+    weekly_recommended_hours: float = Field(default=8.0, ge=1.0, le=40.0)
+    syllabus_units: List[str] = Field(default_factory=list)
+
+
+@router.get("/admin/subjects")
+async def get_admin_subjects(
+    admin_payload: dict = Depends(require_admin),
+):
+    """Retrieve all managed subjects in college syllabus."""
+    return {
+        "success": True,
+        "total_subjects": len(_MANAGED_SUBJECTS),
+        "subjects": _MANAGED_SUBJECTS,
+    }
+
+
+@router.post("/admin/subjects", status_code=status.HTTP_201_CREATED)
+async def create_admin_subject(
+    payload: SubjectCreateRequest,
+    admin_payload: dict = Depends(require_admin),
+):
+    """Add a new subject to the curriculum."""
+    new_id = f"subj-{len(_MANAGED_SUBJECTS) + 1}"
+    new_subject = {
+        "id": new_id,
+        "code": payload.code.strip().upper(),
+        "name": payload.name.strip(),
+        "semester": payload.semester,
+        "weekly_recommended_hours": float(payload.weekly_recommended_hours),
+        "enrolled_count": 0,
+        "status": "Active",
+        "syllabus_units": payload.syllabus_units or ["Unit 1", "Unit 2", "Unit 3", "Unit 4"],
+    }
+    _MANAGED_SUBJECTS.append(new_subject)
+    logger.info("Admin %s created new subject: %s (%s)", admin_payload.get("sub"), new_subject["name"], new_subject["code"])
+    return {
+        "success": True,
+        "message": f"Subject '{payload.name}' added to semester {payload.semester} syllabus",
+        "subject": new_subject,
+    }
+
+
+# ============================================================
+# STUDENT LEADERBOARD ENDPOINT
+# ============================================================
+
+_LEADERBOARD_ROSTER = [
+    {
+        "rank": 1,
+        "scholar_id": "23SKCS022",
+        "name": "Himanshu Jain",
+        "avatar": "HJ",
+        "score": 980,
+        "completion_rate": 100,
+        "study_hours": 35.0,
+        "streak_days": 14,
+        "badge": "Grandmaster",
+        "focus": "Algorithms & Schemas",
+        "trend": "up",
+    },
+    {
+        "rank": 2,
+        "scholar_id": "23SKCS019",
+        "name": "Heman Parashar",
+        "avatar": "HP",
+        "score": 940,
+        "completion_rate": 97,
+        "study_hours": 32.0,
+        "streak_days": 11,
+        "badge": "Backend Pro",
+        "focus": "Supabase & Database",
+        "trend": "up",
+    },
+    {
+        "rank": 3,
+        "scholar_id": "23SKCS015",
+        "name": "Khushi Mathur",
+        "avatar": "KM",
+        "score": 915,
+        "completion_rate": 95,
+        "study_hours": 34.0,
+        "streak_days": 9,
+        "badge": "ML Pioneer",
+        "focus": "TF-IDF & Speech AI",
+        "trend": "up",
+    },
+    {
+        "rank": 4,
+        "scholar_id": "23SKCS001",
+        "name": "Devanshu Jangid",
+        "avatar": "DJ",
+        "score": 880,
+        "completion_rate": 89,
+        "study_hours": 30.8,
+        "streak_days": 8,
+        "badge": "Sprint Champion",
+        "focus": "Operating Systems",
+        "trend": "same",
+        "is_current_user": True,
+    },
+    {
+        "rank": 5,
+        "scholar_id": "23SKCS044",
+        "name": "Aman Sharma",
+        "avatar": "AS",
+        "score": 750,
+        "completion_rate": 78,
+        "study_hours": 26.5,
+        "streak_days": 5,
+        "badge": "Consistent",
+        "focus": "Computer Networks",
+        "trend": "down",
+    },
+    {
+        "rank": 6,
+        "scholar_id": "23SKCS051",
+        "name": "Riya Choudhary",
+        "avatar": "RC",
+        "score": 720,
+        "completion_rate": 75,
+        "study_hours": 25.0,
+        "streak_days": 4,
+        "badge": "On Track",
+        "focus": "Discrete Mathematics",
+        "trend": "up",
+    },
+    {
+        "rank": 7,
+        "scholar_id": "23SKCS067",
+        "name": "Siddharth Verma",
+        "avatar": "SV",
+        "score": 680,
+        "completion_rate": 70,
+        "study_hours": 23.0,
+        "streak_days": 3,
+        "badge": "Rising Star",
+        "focus": "Database Systems",
+        "trend": "down",
+    },
+]
 
 
 @router.get("/leaderboard")

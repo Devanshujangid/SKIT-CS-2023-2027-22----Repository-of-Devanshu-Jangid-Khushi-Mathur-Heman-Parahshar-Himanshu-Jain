@@ -14,7 +14,7 @@ if _env_path.is_file():
     load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 
-from auth import verify_clerk_token
+from auth import verify_clerk_token, require_admin
 from database import get_db
 from routes.ai import router as ai_router, ai_chat, ChatRequest
 from routes.plans import router as plans_router
@@ -118,6 +118,26 @@ async def leaderboard_direct_alias(
         semester=semester,
         user_payload=user_payload,
     )
+
+
+# ============================================================
+# DIRECT ADMIN SUBJECTS ROUTES
+# ============================================================
+
+@app.get("/api/v1/admin/subjects", tags=["Admin Subjects"])
+async def get_admin_subjects_alias(admin_data: dict = Depends(require_admin)):
+    from routes.analytics import get_admin_subjects
+    return await get_admin_subjects(admin_data)
+
+
+@app.post("/api/v1/admin/subjects", tags=["Admin Subjects"], status_code=201)
+async def create_admin_subject_alias(
+    payload: dict,
+    admin_data: dict = Depends(require_admin),
+):
+    from routes.analytics import create_admin_subject, SubjectCreateRequest
+    req = SubjectCreateRequest(**payload)
+    return await create_admin_subject(req, admin_data)
 
 
 # ============================================================
