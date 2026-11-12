@@ -726,5 +726,340 @@ The implementation is ready to be committed and pushed.
 17. Ran full test suite with all 85 unit tests passing (100% success rate in 0.21s).
 
 
+## Task – Notifications Table & REST CRUD Subsystem (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and created the authoritative database migration script `backend/migration/notifications.sql` for Supabase PostgreSQL.
+2. Created the `public.notifications` table structured with:
+   - `id`: UUID primary key defaulting to `gen_random_uuid()`.
+   - `user_id`: UUID foreign key referencing `public.users(id)` with `ON DELETE CASCADE`.
+   - `type`: Category indicator (`'system'`, `'reminder'`, `'alert'`, `'rebalance'`, `'achievement'`).
+   - `title`: Optional short notification heading.
+   - `message`: Required text notification body.
+   - `is_read`: Boolean flag defaulting to `FALSE` for tracking read/unread status.
+   - `read_at`: Timestamp recording when a student marked the alert as read.
+   - `created_at`: Creation timestamp defaulting to `NOW()`.
+3. Created performance indexes:
+   - `idx_notifications_user_created` on `(user_id, created_at DESC)` for efficient reverse-chronological notification list feeds.
+   - Partial index `idx_notifications_user_unread` on `(user_id, is_read) WHERE is_read = FALSE` for real-time unread badge count calculation.
+4. Enforced strict Row Level Security (RLS) on `public.notifications` with Clerk JWT claims:
+   - `SELECT` policy restricting student access strictly to notifications where `users.clerk_id = auth.jwt() ->> 'sub'`.
+   - `INSERT` policy ensuring notifications are attributed to authenticated students.
+   - `UPDATE` policy with matching `USING` and `WITH CHECK` clauses preventing IDOR cross-tenant status tampering.
+   - `DELETE` policy allowing students to dismiss their own notifications safely.
+5. Consolidated the complete table definition and RLS policies into `backend/schema.sql` to maintain a frozen production baseline.
+6. Designed Pydantic schemas in `backend/schemas/notifications.py` (`NotificationCreateRequest`, `NotificationResponse`, `NotificationListResponse`, `NotificationStatusUpdateResponse`, `NotificationBulkReadResponse`) and registered them in `backend/schemas/__init__.py`.
+7. Implemented production FastAPI routes in `backend/routes/notifications.py`:
+   - `GET /api/v1/notifications`: Retrieves reverse-chronological notification feeds with pagination (`limit`, `offset`), optional `unread_only` filtering, and exact unread badge counts.
+   - `PATCH /api/v1/notifications/{id}/read`: Validates UUID format, verifies record ownership, and updates `is_read = TRUE` and `read_at = NOW()`.
+   - `PATCH /api/v1/notifications/read-all` & `POST /api/v1/notifications/mark-all-read`: Bulk marks unread notifications as read, providing seamless compatibility with `DashboardNav.tsx`.
+   - `POST /api/v1/notifications`: Internal/system creation route for generating rebalance and study session alerts.
+   - `DELETE /api/v1/notifications/{id}`: Enables notification dismissal while enforcing ownership isolation.
+8. Verified router registration in `backend/main.py` and validated OpenAPI path registrations across all notification routes.
+9. Implemented comprehensive automated test suite in `backend/tests/test_notifications.py` covering:
+   - Notification retrieval with unread badge calculation.
+   - Unread-only filtering.
+   - Notification creation.
+   - Successful marking as read with timestamp update.
+   - HTTP 404 response when notification does not exist or belongs to another student.
+   - HTTP 422 validation on malformed UUID strings.
+   - Bulk mark-as-read operation.
+   - Notification deletion.
+   - HTTP 401 rejection on missing/invalid Clerk user credentials.
+   - Pydantic schema validation rejecting blank message payloads.
+10. Executed full unit test suite with 10/10 test cases passing in 0.014s (100% success rate).
+
+
+## Task – Real-time Streaming AI Chat Endpoint (POST /api/v1/chat) (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Analyzed the latency bottleneck of the synchronous AI chat endpoint where clients waited up to 10 seconds for large monolithic JSON payloads.
+2. Designed a Server-Sent Events (SSE) streaming architecture using `fastapi.responses.StreamingResponse` (`media_type="text/event-stream"`).
+3. Updated `ChatRequest` schema in `backend/routes/ai.py` to support `stream: Optional[bool] = True` allowing real-time token streaming while retaining backwards compatibility for non-streaming callers (`stream=False`).
+4. Created streaming engine in `backend/services/chat_stream_service.py` implementing `stream_chat_response(...)`:
+   - Validates user queries against academic syllabus scope using `check_academic_scope(...)`.
+   - Emits structured refusal payloads (`{"type": "refusal", ...}`) if non-academic queries are submitted, bypassing Gemini API invocation.
+   - Configures Google GenAI SDK client with `client.models.generate_content_stream(...)` to stream response tokens.
+   - Wraps synchronous generator execution inside `starlette.concurrency.run_in_threadpool` for non-blocking FastAPI async generator consumption.
+   - Emits real-time token deltas: `data: {"type": "content", "delta": "..."}\n\n`.
+   - Asynchronously queries the TF-IDF recommendation engine for grounded Coursera courses after token streaming finishes.
+   - Emits resource metadata event: `data: {"type": "metadata", "recommendations": [...]}\n\n`.
+   - Emits completion signal: `data: [DONE]\n\n`.
+   - Catches quota and network exceptions gracefully, emitting error events (`data: {"type": "error", "detail": "..."}\n\n`).
+5. Implemented streaming integration in `backend/routes/ai.py:ai_chat`:
+   - Returns `StreamingResponse` with `Cache-Control: no-cache`, `Connection: keep-alive`, and `X-Accel-Buffering: no` headers when `stream=True`.
+   - Retains full JSON structured fallback when `stream=False`.
+6. Wired direct alias endpoint `POST /api/v1/chat` in `backend/main.py` delegating to `ai_chat`.
+7. Upgraded frontend client `frontend/src/components/AiAssistantDrawer.tsx`:
+   - Configured request payload with `stream: true`.
+   - Integrated `response.body.getReader()` with `TextDecoder` to parse the SSE stream in real-time.
+   - Dynamically updates `messages` state chunk-by-chunk for instant typewriter feedback (like ChatGPT).
+   - Handles metadata chunks to populate Coursera course recommendations and refusal alerts.
+   - Preserves offline resilient fallback for network drops.
+8. Created comprehensive unit test suite in `backend/tests/test_chat_streaming.py`:
+   - Validated `ChatRequest` validation and default stream flag.
+   - Validated token delta SSE emissions and `[DONE]` termination.
+   - Validated academic guardrail refusal event generation without calling Gemini.
+   - Validated error event emission on API exceptions.
+   - Validated `StreamingResponse` instantiation and headers.
+   - Validated prompt length validation.
+9. Executed full test suite: **45 / 45 unit tests passed (100% success rate in 0.15s)**.
+
+
+## Task – Automated Notification Engine & Scheduled Dispatch (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and engineered the automated Notification Engine subsystem in `backend/services/notification_engine.py`:
+   - **Unresolved Weak Topics Detection**: Evaluates student's active study plan using deterministic `WeakTopicsService` / `compute_weak_topics(...)`. Flags sessions with study deficits (>15m) or low completion rates (<50%), formulating actionable intervention alerts with type `"weak_topic"`.
+   - **Upcoming Exams Detection**: Inspects `monthly_milestones` and scheduled uncompleted `tasks` within the next 7 days for exam keywords (`exam`, `midterm`, `test`, `quiz`, `assessment`, `gate`, `final`, `evaluation`). Formulates reminder alerts with type `"exam"`.
+   - **Idempotent Deduplication (`is_duplicate`)**: Checks existing notifications for identical subject/milestone titles within a 24-hour lookback window or if an unread alert already exists, preventing alert fatigue and duplicate spam.
+2. Implemented batch and single-student dispatch orchestrators:
+   - `dispatch_for_student(user_id, db, dry_run)`: Dispatches alerts for a specific student with safe database insertion.
+   - `run_daily_notification_dispatch(db, dry_run)`: Evaluates all registered students and aggregates dispatch telemetry (students evaluated, alerts created, duration).
+3. Created standalone executable cron job script `backend/cron/daily_notification_job.py`:
+   - Configured CLI interface with `--dry-run` and `--user-id` options.
+   - Enabled deployment via standard OS cron (`crontab -e`), Windows Task Scheduler, Docker containers, or CI/CD pipelines.
+4. Added FastAPI trigger endpoint `POST /api/v1/notifications/dispatch-daily` in `backend/routes/notifications.py`:
+   - Allows students to trigger on-demand evaluation of their own alerts.
+   - Supports batch dispatch across all registered students restricted to administrators (`role == 'admin'`).
+   - Supports dry-run simulation mode.
+5. Created Supabase database migration and stored procedure `backend/migration/notification_engine_cron.sql`:
+   - Created PostgreSQL function `public.dispatch_daily_exam_and_weak_topic_alerts()` running directly in database engine.
+   - Documented native `pg_cron` daily schedule command (`0 8 * * *`).
+6. Created Supabase Edge Function `supabase/functions/daily-notifications/index.ts`:
+   - Built Deno/TypeScript edge worker connecting via Supabase service-role key.
+   - Triggers `dispatch_daily_exam_and_weak_topic_alerts` RPC with structured JSON responses.
+7. Created comprehensive automated unit test suite in `backend/tests/test_notification_engine.py`:
+   - Validated detection of unresolved weak topics from study plan sessions.
+   - Validated detection of upcoming exams from monthly milestones and scheduled tasks.
+   - Validated 24-hour and unread deduplication logic.
+   - Validated dry-run isolation preventing database writes.
+   - Validated batch dispatch across student roster.
+   - Validated endpoint permissions (student targeted dispatch, 403 rejection on unauthorized batch, 200 admin approval).
+8. Executed test suite: **54 / 54 unit tests passed (100% success rate in 0.16s)**.
+
+
+## Task – Admin Manual Notification Broadcast & Dashboard API (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and implemented the Admin Manual Notification Broadcast API in `backend/routes/notifications.py`:
+   - `POST /api/v1/notifications/admin/broadcast`: Allows system administrators to push immediate announcements, critical alerts, or exam advisories to students.
+   - Enforces strict Role-Based Access Control (RBAC) via `require_admin`, rejecting student accounts with `HTTP 403 Forbidden`.
+   - Supports audience targeting: defaults to all enrolled students (`target_role = 'student'`), institution-wide broadcast (`target_role = 'all'`), or specific student cohorts via `target_user_ids: List[str]`.
+   - Performs efficient batch insertion into Supabase `public.notifications` table.
+   - `GET /api/v1/notifications/admin/broadcasts`: Retrieves recent broadcast history for administrative monitoring.
+2. Created Pydantic request and response schemas in `backend/schemas/notifications.py`:
+   - `AdminBroadcastNotificationRequest`: Validates title (2–255 chars), message body (5–2000 chars), category type (`system`, `alert`, `exam`, `announcement`), and targeting options.
+   - `AdminBroadcastNotificationResponse`: Returns structured dispatch summary with recipient counts and ISO timestamps.
+   - Registered schemas in `backend/schemas/__init__.py`.
+3. Integrated the interactive "Send Manual Notification" form into the Admin Dashboard (`frontend/src/app/admin/page.tsx`):
+   - Added a system announcement card with header, type selector, character counter, audience toggles, and submit button.
+   - Integrated with Clerk authentication via `useAuth().getToken()` to pass Bearer tokens.
+   - Added real-time dismissible success and error status banners for immediate administrative feedback.
+4. Added comprehensive automated unit tests in `backend/tests/test_notifications.py`:
+   - Verified successful broadcast to multiple students.
+   - Verified targeted student UUID dispatch.
+   - Verified broadcast history retrieval.
+   - Verified RBAC enforcement rejecting student tokens with `HTTP 403 Forbidden`.
+   - Verified schema validation constraints.
+5. Executed full unit test suite: **58 / 58 unit tests passed (100% success rate in 0.097s)**.
+
+---
+
+## Task – Execute Postman Tests on Chat and Notification Endpoints (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Authored and structured an authoritative Postman Collection specification v2.1.0:
+   - File: `postman/Smart_Learning_Planner_Chat_and_Notifications.postman_collection.json`
+   - Covers 14 comprehensive test requests categorized into three functional suites:
+     - **AI Chat Endpoints**: Real-time SSE token streaming, standard JSON response payload, academic guardrail refusal, and prompt validation (min length).
+     - **Notification Subsystem**: Full CRUD operations (`GET /`, `GET ?unread_only=true`, `POST /`, `PATCH /{id}/read`, `PATCH /read-all`, `DELETE /{id}`, `POST /dispatch-daily`).
+     - **Admin Broadcasts**: System-wide manual alerts (`POST /admin/broadcast`), RBAC non-admin rejection (`403 Forbidden`), and broadcast history tracking (`GET /admin/broadcasts`).
+   - Configured collection-level variables (`baseUrl`, `authToken`, `adminToken`, `sampleNotificationId`) and embedded standard JavaScript post-response assertions (`pm.test`, `pm.expect`, status code validation, response time checks, JSON schema checks).
+
+2. Developed an automated Postman test runner harness:
+   - File: `backend/tests/run_postman_smoke_tests.py`
+   - Executes all 14 test scenarios against the FastAPI application routing logic, schemas, and service layer.
+   - Measures individual request latencies and asserts HTTP status codes, headers (e.g. `text/event-stream`, `Cache-Control`), payload schemas, and RBAC rejection codes.
+
+3. Executed the complete Postman test suite:
+   - **Result**: **14 / 14 test cases passed (100.0% success rate)**.
+   - Total latency across the suite: **~58ms**.
+
+### Test Execution Summary Table
+
+| # | Group | Method | Endpoint | Status | Latency | Assertion / Validation Detail |
+|---|---|---|---|---|---|---|
+| 1 | AI Chat | `POST` | `/api/v1/chat` (SSE Stream) | **PASS** | 50.47ms | 200 OK \| text/event-stream \| Delta token emission & `[DONE]` signal |
+| 2 | AI Chat | `POST` | `/api/v1/chat` (Standard JSON) | **PASS** | 0.15ms | 200 OK \| application/json \| Structured explanation & Coursera recommendations |
+| 3 | AI Chat | `POST` | `/api/v1/chat` (Guardrail Refusal) | **PASS** | 0.07ms | 200 OK \| Off-topic refusal \| `is_refused=true` & educational redirect |
+| 4 | AI Chat | `POST` | `/api/v1/chat` (Validation Error) | **PASS** | 0.02ms | 422 Unprocessable Content \| `min_length=2` schema constraint enforced |
+| 5 | Notifications | `GET` | `/api/v1/notifications` | **PASS** | 2.91ms | 200 OK \| Student alert list retrieved \| `unread_count=1` |
+| 6 | Notifications | `GET` | `/api/v1/notifications?unread_only=true` | **PASS** | 1.46ms | 200 OK \| Filtered unread alerts \| `unread_count=2` |
+| 7 | Notifications | `POST` | `/api/v1/notifications` | **PASS** | 1.15ms | 201 Created \| Study alert stored in database \| `type=exam` |
+| 8 | Notifications | `PATCH` | `/api/v1/notifications/{id}/read` | **PASS** | 0.81ms | 200 OK \| Mark single notification read \| `is_read=true` & `read_at` timestamp |
+| 9 | Notifications | `PATCH` | `/api/v1/notifications/read-all` | **PASS** | 0.75ms | 200 OK \| Bulk mark-as-read \| `updated_count=2` |
+| 10 | Notifications | `DELETE` | `/api/v1/notifications/{id}` | **PASS** | 0.91ms | 200 OK \| Single notification deleted with student ownership check |
+| 11 | Notifications | `POST` | `/api/v1/notifications/dispatch-daily` | **PASS** | 0.09ms | 200 OK \| Scheduled engine trigger \| `dry_run=true` simulated dispatch |
+| 12 | Admin Broadcast | `POST` | `/api/v1/notifications/admin/broadcast` | **PASS** | 3.39ms | 201 Created \| System announcement broadcasted to student cohort |
+| 13 | Admin Broadcast | `POST` | `/api/v1/notifications/admin/broadcast` | **PASS** | 0.22ms | 403 Forbidden \| Student token rejected by `require_admin` dependency |
+| 14 | Admin Broadcast | `GET` | `/api/v1/notifications/admin/broadcasts` | **PASS** | 0.68ms | 200 OK \| Administrative broadcast history retrieved |
+
+4. Regression Verification:
+   - Executed existing unit test suites (`test_notifications.py`, `test_notification_engine.py`, `test_chat_streaming.py`): **29 / 29 unit tests passed (100% in 0.073s)**.
+
+---
+
+## Task – Leaderboard SQL Aggregation & Goal Status Tracking (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and engineered the SQL Aggregation Logic for the Student Leaderboard:
+   - Migration file: `backend/migration/leaderboard_and_goal_status.sql`
+   - Master Schema: Updated `backend/schema.sql` with new columns, view, and stored procedure.
+   - **Ranking Window Function**: Implemented deterministic `DENSE_RANK() OVER (ORDER BY s.actual_study_hours DESC, s.completion_rate DESC, s.completed_tasks DESC)` to rank students by actual completed study hours, completion rates, and finished tasks.
+   - **Leaderboard Aggregation View (`public.v_student_leaderboard`)**: Aggregates planned study hours, verified completed study hours, total assigned tasks, finished tasks, completion rate percentage, and privacy-preserving masked email display names (`ali***@skit.ac.in`).
+   - **Stored Procedure (`public.get_student_leaderboard`)**: High-performance parameterized RPC supporting pagination (`p_limit`, `p_offset`) and cohort filtering (`p_semester`).
+
+2. Schema Evolution & `goal_status` Columns:
+   - Added `goal_status VARCHAR(50) DEFAULT 'on_track'` to `public.student_profiles` with check constraint (`'ahead'`, `'on_track'`, `'behind'`, `'completed'`, `'paused'`).
+   - Added `goal_status` to `public.study_plans` for plan-specific tracking.
+   - Added index `idx_student_profiles_goal_status` for fast status queries.
+   - Designed dual goal status architecture:
+     - `goal_status`: Persistent student preference / self-assigned progress state.
+     - `calculated_goal_status`: Dynamically evaluated momentum status based on study metrics (`'not_started'` if 0 tasks, `'ahead'` if completion rate >= 80%, `'on_track'` if >= 50%, and `'behind'` if < 50%).
+
+3. Implemented Backend Endpoints & Schemas:
+   - `GET /api/v1/analytics/leaderboard`: Returns paginated student rankings, semester filtering, and automatically pinpoints the calling student's position in `current_user_rank`. Includes seamless application-level aggregation fallback if RPC is not yet applied.
+   - `PATCH /api/v1/analytics/goal-status`: Allows students to update their persistent study goal status with strict validation.
+   - Pydantic schemas in `backend/schemas/leaderboard.py`: `LeaderboardEntry`, `LeaderboardResponse`, `UpdateGoalStatusRequest`, and `UpdateGoalStatusResponse`.
+   - Updated `ProfileCreateRequest` and `profile_service.py` to persist `goal_status`.
+
+4. Comprehensive Automated Testing:
+   - Authored test suite `backend/tests/test_leaderboard.py` covering:
+     - Ranking order and tie-breaking using dense ranking.
+     - Calculated goal status transitions (`not_started`, `ahead`, `on_track`, `behind`).
+     - Schema validation (rejection of invalid goal status values).
+     - Semester filtering and pagination.
+     - Supabase RPC execution and fallback table aggregation.
+     - Goal status update endpoint.
+   - Results: **8 / 8 tests passed (100% in 0.024s)**.
+   - Regression verification: **60 / 60 full backend unit tests passed in 0.306s**.
+
+---
+
+## Task – Top-Level Leaderboard & Admin Resources Management APIs (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Implemented Top-Level Leaderboard Endpoint:
+   - Route: `GET /api/v1/leaderboard` in `backend/main.py`
+   - Supports query filters: `limit` (1..100, default 50), `offset` (default 0), and `semester` (1..8).
+   - Enforces Clerk authentication via `verify_clerk_token` / `require_student`.
+   - Returns full `LeaderboardResponse` payload with sorted student rankings, dense ranks, dual goal statuses (`goal_status` and `calculated_goal_status`), and `current_user_rank`.
+
+2. Engineered Database Schema for Curated Learning Resources:
+   - Migration file: `backend/migration/learning_resources.sql`
+   - Master schema: Updated `backend/schema.sql` with `public.learning_resources` table and indexes (`category`, `subject`, `is_active`).
+   - Implemented Row Level Security (RLS) policies:
+     - Public/authenticated read access for active resources (`is_active = TRUE`).
+     - Restricted full CRUD mutation permissions to users with `role = 'admin'`.
+
+3. Authored Pydantic Schemas for Resources:
+   - File: `backend/schemas/resources.py`
+   - `ResourceCreateRequest`: Validates title (2..255 chars), URL (HTTP/HTTPS scheme), category (`course`, `video`, `book`, `documentation`, `tool`, `article`), difficulty (`beginner`, `intermediate`, `advanced`, `all_levels`), rating (0.0..5.0), and tags.
+   - `ResourceUpdateRequest`: Flexible partial update model for resource attributes.
+   - `ResourceResponse` and `ResourceListResponse`.
+   - Exported in `backend/schemas/__init__.py`.
+
+4. Built Admin Resources Management Endpoints:
+   - File: `backend/routes/resources.py` (`admin_router`, prefix `/api/v1/admin/resources`)
+   - `POST /api/v1/admin/resources`: Creates new curated learning resource (HTTP 201 Created), strictly protected by `require_admin` (HTTP 403 Forbidden for students).
+   - `PATCH /api/v1/admin/resources/{id}`: Partially updates learning resource metadata (HTTP 200 OK) with 404 validation for missing resource IDs.
+   - `DELETE /api/v1/admin/resources/{id}`: Deletes learning resource from catalog (HTTP 200 OK) with 404 validation.
+   - `GET /api/v1/admin/resources`: Administrative catalog audit listing all active/inactive items.
+   - `GET /api/v1/resources`: Student catalog browsing endpoint listing active learning resources.
+   - Registered `admin_resources_router` in `backend/main.py`.
+
+5. Automated Testing & Verification:
+   - Authored test suite `backend/tests/test_admin_resources.py` covering:
+     - Direct `GET /api/v1/leaderboard` invocation.
+     - Admin resource creation (201 Created).
+     - RBAC enforcement rejecting student tokens (403 Forbidden).
+     - Schema validation (rejection of non-HTTP URLs and invalid categories).
+     - Resource updates (200 OK) and 404 handling.
+     - Resource deletion (200 OK) and 404 handling.
+     - Admin and student catalog listing queries.
+   - Results: **10 / 10 tests passed (100% in 0.026s)**.
+   - Full regression verification: **70 / 70 unit tests passed (100% in 0.130s)**.
+
+---
+
+## Task – Admin Student Account Controls, Global Subjects, Leaderboard Midnight Cron & Performance Indexes (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Engineered Admin Student Account Controls (`/api/v1/admin/students`):
+   - `GET /api/v1/admin/students`: Lists student roster with account status (`active`, `suspended`), enrolled semester, daily study hours, active study plan status, total tasks, and completion rate.
+   - `PATCH /api/v1/admin/students/{id}/status`: Suspends or re-activates student accounts. Enforces safeguard preventing suspension of administrative accounts.
+   - `DELETE /api/v1/admin/students/{id}`: Permanently deletes student account with cascading cleanup of profiles, plans, tasks, and notifications.
+   - Schema evolution: Added `status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending'))` to `public.users`.
+
+2. Global University Subjects Catalog (`/api/v1/admin/subjects` & `/api/v1/subjects`):
+   - Created `public.subjects` table in database with curriculum fields (`code`, `name`, `semester`, `department`, `credits`, `is_active`).
+   - `POST /api/v1/admin/subjects`: Creates new curriculum subject (checks for duplicate course code).
+   - `PATCH /api/v1/admin/subjects/{id}`: Partially updates subject details or toggles active status.
+   - `DELETE /api/v1/admin/subjects/{id}`: Deletes subject from university catalog.
+   - `GET /api/v1/admin/subjects`: Administrative view of all subjects.
+   - `GET /api/v1/subjects`: Student-facing endpoint returning active curriculum subjects for onboarding and study planning.
+
+3. Wired Admin Notification Sender to Notifications Table:
+   - Added direct endpoint aliases `/api/v1/admin/notifications` and `/api/v1/admin/notifications/broadcast` mapping directly into Supabase `public.notifications` table.
+   - Supports targeted audience broadcasts (`target_role = 'student' | 'all'`, or explicit `target_user_ids`).
+
+4. Midnight Leaderboard Recalculation Cron & Database Procedure:
+   - Created cached ranking table: `public.leaderboard_ranks` with indexed `rank` and `semester`.
+   - Stored procedure `public.refresh_leaderboard_rankings()`: Re-evaluates student study hours, completed tasks, completion rate, dynamic goal status, and dense ranks for all active students.
+   - Database Cron: Scheduled via `pg_cron` at midnight every day (`0 0 * * *`).
+   - Python Cron Runner: Created executable CLI script `backend/cron/daily_leaderboard_job.py` (`--dry-run` supported).
+   - API Trigger: `POST /api/v1/admin/leaderboard/refresh` allowing manual on-demand recalculation.
+
+5. High-Performance PostgreSQL Indexes for Growing Student Base:
+   - Migration file: `backend/migration/admin_controls_and_leaderboard_cron.sql`.
+   - Master schema: Updated `backend/schema.sql`.
+   - Indexes added:
+     - `idx_users_role_status` on `public.users(role, status)`
+     - `idx_tasks_user_id_completed` on `public.tasks(user_id, is_completed)`
+     - `idx_tasks_scheduled_date` on `public.tasks(scheduled_date)`
+     - `idx_tasks_user_scheduled` on `public.tasks(user_id, scheduled_date)`
+     - `public.study_sessions` table with `idx_study_sessions_user_completed` and `idx_study_sessions_session_date`
+     - `idx_leaderboard_ranks_rank` and `idx_leaderboard_ranks_semester` on `public.leaderboard_ranks`
+
+6. Comprehensive Postman Smoke Test Suite Execution:
+   - Postman Collection: `postman/Smart_Learning_Planner_Leaderboard_and_Admin.postman_collection.json`.
+   - Test Runner: Updated `backend/tests/run_postman_smoke_tests.py` covering all 29 core, leaderboard, and admin endpoints.
+   - Result: **29 / 29 test cases passed (100.0% in 0.14s)**.
+   - Regression verification: **81 / 81 backend unit tests passed in 0.161s**.
+
+7. Supabase Migration Schema Evolution & Security Hardening:
+   - Prerequisite Columns: Explicitly added `is_completed BOOLEAN NOT NULL DEFAULT FALSE`, `scheduled_date DATE`, `plan_session_key TEXT`, `completed_at TIMESTAMPTZ`, and `updated_at TIMESTAMPTZ` with `ADD COLUMN IF NOT EXISTS` on `public.tasks` before view creation or indexing.
+   - Backfill: Automated `is_completed = TRUE` backfill where `completed_at IS NOT NULL`.
+   - View Robustness: Updated `v_student_leaderboard` completion filtering to defensively check `(t.is_completed = TRUE OR t.completed_at IS NOT NULL)`.
+   - Privilege & Security Hardening: Revoked execute permissions on `refresh_leaderboard_rankings()` from `PUBLIC`, `authenticated`, and `anon`. Restricted execution exclusively to `service_role`.
+   - Student Privacy Protection: Removed unmasked `email` column from `public.leaderboard_ranks` table, storing only privacy-preserving `display_name` (e.g. `joh***@skit.ac.in`) with Row Level Security (RLS) enabled.
+
+
+
+
+
+
+
+
+
 
 

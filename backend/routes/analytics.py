@@ -1,13 +1,15 @@
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from auth import require_admin, require_student
 from database import get_db
+from schemas.leaderboard import UpdateGoalStatusRequest
 from services.weak_topics import compute_weak_topics
 
 logger = logging.getLogger(__name__)
@@ -272,13 +274,13 @@ async def get_admin_roster_analytics(
             # Tasks aggregation
             task_res = (
                 db.table("tasks")
-                .select("id, is_completed")
+                .select("id, is_completed, completed_at")
                 .eq("user_id", uid)
                 .execute()
             )
             student_tasks = task_res.data or []
             tot_tasks = len(student_tasks)
-            comp_tasks = sum(1 for t in student_tasks if t.get("is_completed"))
+            comp_tasks = sum(1 for t in student_tasks if t.get("is_completed") or (t.get("completed_at") is not None))
             completion_rate = int(round((comp_tasks / tot_tasks) * 100)) if tot_tasks > 0 else 0
 
             roster.append({
@@ -308,4 +310,462 @@ async def get_admin_roster_analytics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve student roster",
+        ) from exc
+
+
+# ============================================================
+# SUBJECT MANAGEMENT MODELS & ENDPOINTS (ADMIN)
+# ============================================================
+
+_MANAGED_SUBJECTS = [
+    {
+        "id": "subj-1",
+        "code": "CS-501",
+        "name": "Operating Systems",
+        "semester": 5,
+        "weekly_recommended_hours": 10.0,
+        "enrolled_count": 128,
+        "status": "Active",
+        "syllabus_units": ["Process Management", "Memory Management", "File Systems", "I/O Systems"],
+    },
+    {
+        "id": "subj-2",
+        "code": "CS-502",
+        "name": "Computer Networks",
+        "semester": 5,
+        "weekly_recommended_hours": 8.0,
+        "enrolled_count": 124,
+        "status": "Active",
+        "syllabus_units": ["Physical & Data Link", "Network Layer & Routing", "Transport Layer (TCP/UDP)", "Application Layer"],
+    },
+    {
+        "id": "subj-3",
+        "code": "CS-503",
+        "name": "Database Management Systems",
+        "semester": 5,
+        "weekly_recommended_hours": 8.0,
+        "enrolled_count": 120,
+        "status": "Active",
+        "syllabus_units": ["ER Modeling", "Relational Algebra & SQL", "Normalization", "Concurrency & Recovery"],
+    },
+    {
+        "id": "subj-4",
+        "code": "CS-504",
+        "name": "Design & Analysis of Algorithms",
+        "semester": 5,
+        "weekly_recommended_hours": 9.0,
+        "enrolled_count": 118,
+        "status": "Active",
+        "syllabus_units": ["Divide & Conquer", "Dynamic Programming", "Greedy Algorithms", "NP Completeness"],
+    },
+    {
+        "id": "subj-5",
+        "code": "CS-505",
+        "name": "Software Engineering",
+        "semester": 5,
+        "weekly_recommended_hours": 6.0,
+        "enrolled_count": 115,
+        "status": "Active",
+        "syllabus_units": ["SDLC Models", "Requirements & UML", "Testing & QA", "Agile & DevOps"],
+    },
+]
+
+
+class SubjectCreateRequest(BaseModel):
+    code: str = Field(..., min_length=2, max_length=20, description="Subject Code (e.g. CS-501)")
+    name: str = Field(..., min_length=2, max_length=150, description="Full Subject Name")
+    semester: int = Field(default=5, ge=1, le=8, description="Semester number")
+    weekly_recommended_hours: float = Field(default=8.0, ge=1.0, le=40.0)
+    syllabus_units: List[str] = Field(default_factory=list)
+
+
+@router.get("/admin/subjects")
+async def get_admin_subjects(
+    admin_payload: dict = Depends(require_admin),
+):
+    """Retrieve all managed subjects in college syllabus."""
+    return {
+        "success": True,
+        "total_subjects": len(_MANAGED_SUBJECTS),
+        "subjects": _MANAGED_SUBJECTS,
+    }
+
+
+@router.post("/admin/subjects", status_code=status.HTTP_201_CREATED)
+async def create_admin_subject(
+    payload: SubjectCreateRequest,
+    admin_payload: dict = Depends(require_admin),
+):
+    """Add a new subject to the curriculum."""
+    new_id = f"subj-{len(_MANAGED_SUBJECTS) + 1}"
+    new_subject = {
+        "id": new_id,
+        "code": payload.code.strip().upper(),
+        "name": payload.name.strip(),
+        "semester": payload.semester,
+        "weekly_recommended_hours": float(payload.weekly_recommended_hours),
+        "enrolled_count": 0,
+        "status": "Active",
+        "syllabus_units": payload.syllabus_units or ["Unit 1", "Unit 2", "Unit 3", "Unit 4"],
+    }
+    _MANAGED_SUBJECTS.append(new_subject)
+    logger.info("Admin %s created new subject: %s (%s)", admin_payload.get("sub"), new_subject["name"], new_subject["code"])
+    return {
+        "success": True,
+        "message": f"Subject '{payload.name}' added to semester {payload.semester} syllabus",
+        "subject": new_subject,
+    }
+
+
+# ============================================================
+# STUDENT LEADERBOARD ENDPOINT
+# ============================================================
+
+_LEADERBOARD_ROSTER = [
+    {
+        "rank": 1,
+        "scholar_id": "23SKCS022",
+        "name": "Himanshu Jain",
+        "avatar": "HJ",
+        "score": 980,
+        "completion_rate": 100,
+        "study_hours": 35.0,
+        "streak_days": 14,
+        "badge": "Grandmaster",
+        "focus": "Algorithms & Schemas",
+        "trend": "up",
+    },
+    {
+        "rank": 2,
+        "scholar_id": "23SKCS019",
+        "name": "Heman Parashar",
+        "avatar": "HP",
+        "score": 940,
+        "completion_rate": 97,
+        "study_hours": 32.0,
+        "streak_days": 11,
+        "badge": "Backend Pro",
+        "focus": "Supabase & Database",
+        "trend": "up",
+    },
+    {
+        "rank": 3,
+        "scholar_id": "23SKCS015",
+        "name": "Khushi Mathur",
+        "avatar": "KM",
+        "score": 915,
+        "completion_rate": 95,
+        "study_hours": 34.0,
+        "streak_days": 9,
+        "badge": "ML Pioneer",
+        "focus": "TF-IDF & Speech AI",
+        "trend": "up",
+    },
+    {
+        "rank": 4,
+        "scholar_id": "23SKCS001",
+        "name": "Devanshu Jangid",
+        "avatar": "DJ",
+        "score": 880,
+        "completion_rate": 89,
+        "study_hours": 30.8,
+        "streak_days": 8,
+        "badge": "Sprint Champion",
+        "focus": "Operating Systems",
+        "trend": "same",
+        "is_current_user": True,
+    },
+    {
+        "rank": 5,
+        "scholar_id": "23SKCS044",
+        "name": "Aman Sharma",
+        "avatar": "AS",
+        "score": 750,
+        "completion_rate": 78,
+        "study_hours": 26.5,
+        "streak_days": 5,
+        "badge": "Consistent",
+        "focus": "Computer Networks",
+        "trend": "down",
+    },
+    {
+        "rank": 6,
+        "scholar_id": "23SKCS051",
+        "name": "Riya Choudhary",
+        "avatar": "RC",
+        "score": 720,
+        "completion_rate": 75,
+        "study_hours": 25.0,
+        "streak_days": 4,
+        "badge": "On Track",
+        "focus": "Discrete Mathematics",
+        "trend": "up",
+    },
+    {
+        "rank": 7,
+        "scholar_id": "23SKCS067",
+        "name": "Siddharth Verma",
+        "avatar": "SV",
+        "score": 680,
+        "completion_rate": 70,
+        "study_hours": 23.0,
+        "streak_days": 3,
+        "badge": "Rising Star",
+        "focus": "Database Systems",
+        "trend": "down",
+    },
+]
+
+
+@router.get("/leaderboard")
+async def get_student_leaderboard_endpoint(
+    limit: int = 50,
+    offset: int = 0,
+    semester: Optional[int] = None,
+    user_payload: dict = Depends(require_student),
+):
+    """
+    Returns the student leaderboard ranking peers by study hours, completion rates, and goal status.
+    Uses Supabase RPC 'get_student_leaderboard' with automatic SQL/Python aggregation fallback.
+    Accessible by: 'student' or 'admin' roles.
+    """
+    clerk_id = user_payload.get("sub")
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    try:
+        db = get_db()
+        current_user_id = None
+        if clerk_id:
+            user_lookup = (
+                db.table("users")
+                .select("id")
+                .eq("clerk_id", clerk_id)
+                .limit(1)
+                .execute()
+            )
+            if user_lookup.data:
+                current_user_id = str(user_lookup.data[0]["id"])
+
+        leaderboard_data = None
+        # Attempt to invoke the optimized Supabase RPC stored procedure
+        try:
+            rpc_res = db.rpc(
+                "get_student_leaderboard",
+                {
+                    "p_limit": limit,
+                    "p_offset": offset,
+                    "p_semester": semester,
+                },
+            ).execute()
+            if rpc_res.data is not None:
+                leaderboard_data = rpc_res.data
+        except Exception as rpc_err:
+            logger.info("Leaderboard RPC unavailable, falling back to application aggregation: %s", rpc_err)
+            leaderboard_data = None
+
+        if leaderboard_data is None:
+            # Fallback: Query tables directly and perform aggregation
+            users_query = db.table("users").select("id, email, role").eq("role", "student")
+            users_res = users_query.execute()
+            student_users = users_res.data or []
+
+            raw_entries = []
+            for u in student_users:
+                uid = str(u["id"])
+                email = u.get("email", "")
+
+                # Mask email for privacy (e.g. joh***@skit.ac.in)
+                if "@" in email:
+                    parts = email.split("@")
+                    local = parts[0]
+                    domain = parts[1]
+                    display_name = f"{local[:3]}***@{domain}" if len(local) > 3 else f"{local[:1]}***@{domain}"
+                else:
+                    display_name = "Student***"
+
+                prof_res = (
+                    db.table("student_profiles")
+                    .select("semester, study_hours_per_day, goals, goal_status")
+                    .eq("user_id", uid)
+                    .limit(1)
+                    .execute()
+                )
+                prof = prof_res.data[0] if prof_res.data else {}
+                student_semester = prof.get("semester", 1)
+
+                if semester is not None and student_semester != semester:
+                    continue
+
+                task_res = (
+                    db.table("tasks")
+                    .select("id, description, is_completed")
+                    .eq("user_id", uid)
+                    .execute()
+                )
+                tasks = task_res.data or []
+
+                total_tasks = len(tasks)
+                completed_tasks = 0
+                planned_hours = 0.0
+                actual_hours = 0.0
+
+                for t in tasks:
+                    desc = t.get("description") or ""
+                    is_done = bool(t.get("is_completed")) or (t.get("completed_at") is not None)
+
+                    duration = 1.0
+                    if "Duration:" in desc:
+                        try:
+                            parts = desc.split("Duration:")[1].split("hours")[0].strip()
+                            duration = float(parts)
+                        except Exception:
+                            duration = 1.0
+
+                    planned_hours += duration
+                    if is_done:
+                        completed_tasks += 1
+                        actual_hours += duration
+
+                completion_rate = (
+                    round((completed_tasks / total_tasks) * 100, 1)
+                    if total_tasks > 0
+                    else 0.0
+                )
+
+                stored_goal_status = prof.get("goal_status") or "on_track"
+
+                if total_tasks == 0:
+                    calculated_goal_status = "not_started"
+                elif completion_rate >= 80.0:
+                    calculated_goal_status = "ahead"
+                elif completion_rate >= 50.0:
+                    calculated_goal_status = "on_track"
+                else:
+                    calculated_goal_status = "behind"
+
+                raw_entries.append({
+                    "user_id": uid,
+                    "display_name": display_name,
+                    "semester": student_semester,
+                    "target_hours_per_day": round(float(prof.get("study_hours_per_day", 2.0)), 1),
+                    "goal_status": stored_goal_status,
+                    "calculated_goal_status": calculated_goal_status,
+                    "primary_goals": prof.get("goals", []),
+                    "total_tasks": total_tasks,
+                    "completed_tasks": completed_tasks,
+                    "planned_study_hours": round(planned_hours, 1),
+                    "actual_study_hours": round(actual_hours, 1),
+                    "completion_rate": completion_rate,
+                })
+
+            # Sort: 1. actual_study_hours DESC, 2. completion_rate DESC, 3. completed_tasks DESC
+            raw_entries.sort(
+                key=lambda x: (x["actual_study_hours"], x["completion_rate"], x["completed_tasks"]),
+                reverse=True,
+            )
+
+            # Assign Dense Rank
+            current_rank = 1
+            for i, entry in enumerate(raw_entries):
+                if i > 0:
+                    prev = raw_entries[i - 1]
+                    if (
+                        entry["actual_study_hours"],
+                        entry["completion_rate"],
+                        entry["completed_tasks"],
+                    ) != (
+                        prev["actual_study_hours"],
+                        prev["completion_rate"],
+                        prev["completed_tasks"],
+                    ):
+                        current_rank += 1
+                entry["rank"] = current_rank
+
+            total_count = len(raw_entries)
+            paginated_entries = raw_entries[offset : offset + limit]
+            leaderboard_data = paginated_entries
+            all_entries_for_lookup = raw_entries
+        else:
+            total_count = len(leaderboard_data)
+            all_entries_for_lookup = leaderboard_data
+
+        # Locate current user standing
+        current_user_rank = None
+        if current_user_id:
+            for entry in all_entries_for_lookup:
+                if str(entry.get("user_id")) == current_user_id:
+                    current_user_rank = entry
+                    break
+
+        return {
+            "success": True,
+            "total_students": total_count,
+            "semester_filter": semester,
+            "leaderboard": leaderboard_data,
+            "current_user_rank": current_user_rank,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to retrieve student leaderboard")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate leaderboard aggregation",
+        ) from exc
+
+
+@router.patch("/goal-status")
+async def update_student_goal_status_endpoint(
+    payload: UpdateGoalStatusRequest,
+    user_payload: dict = Depends(require_student),
+):
+    """
+    Updates the authenticated student's persistent goal_status column in student_profiles.
+    """
+    clerk_id = user_payload.get("sub")
+    if not clerk_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user Clerk ID is missing",
+        )
+
+    try:
+        db = get_db()
+
+        # Resolve internal user UUID
+        user_res = (
+            db.table("users")
+            .select("id")
+            .eq("clerk_id", clerk_id)
+            .limit(1)
+            .execute()
+        )
+        if not user_res.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User profile not found",
+            )
+
+        user_id = str(user_res.data[0]["id"])
+
+        db.table("student_profiles").update(
+            {"goal_status": payload.goal_status}
+        ).eq("user_id", user_id).execute()
+
+        return {
+            "success": True,
+            "user_id": user_id,
+            "goal_status": payload.goal_status,
+            "message": "Goal status updated successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to update student goal status")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update goal status",
         ) from exc

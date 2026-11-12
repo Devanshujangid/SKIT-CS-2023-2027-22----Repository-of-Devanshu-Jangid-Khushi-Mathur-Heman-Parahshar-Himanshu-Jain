@@ -9,18 +9,25 @@ from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
 from starlette.concurrency import run_in_threadpool
 from services.recommendation_service import recommendation_service
+<<<<<<< HEAD
 from services.assistant_guardrail import check_academic_scope, check_context_window_safety
 from prompts.assistant import (
     MODULE_2_ASSISTANT_BASE_INSTRUCTION,
     build_conversational_context_prompt,
 )
 
+=======
+from services.assistant_guardrail import check_academic_scope
+from services.chat_stream_service import stream_chat_response
+from services.student_context import get_student_context
+>>>>>>> origin/main
 from database import (
     get_db,
     get_or_create_user,
@@ -71,6 +78,7 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="Student's question or learning topic.",
     )
+<<<<<<< HEAD
     goal_context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional goal evaluation telemetry (target_study_hours, studied_hours, status).",
@@ -78,6 +86,11 @@ class ChatRequest(BaseModel):
     rank_context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional leaderboard standing telemetry (rank, xp_score, streak_days, primary_focus).",
+=======
+    stream: Optional[bool] = Field(
+        default=True,
+        description="Whether to stream response tokens in real-time via Server-Sent Events (SSE).",
+>>>>>>> origin/main
     )
 
 
@@ -829,9 +842,22 @@ async def ai_chat(
 
     try:
         logger.info(
-            "AI chat request received for user: %s",
+            "AI chat request received for user: %s (stream=%s)",
             clerk_id,
+            payload.stream,
         )
+
+        # Real-time streaming response (SSE)
+        if payload.stream:
+            return StreamingResponse(
+                stream_chat_response(message=message, clerk_id=clerk_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
         # ------------------------------------------------------------------
         # Academic Syllabus & Context-Window Guardrail Check
@@ -858,7 +884,13 @@ async def ai_chat(
                 "recommendations": [],
                 "recommendation_count": 0,
             }
+                # Fetch verified student personalization context.
+        student_context = await run_in_threadpool(
+            get_student_context,
+            clerk_id,
+        )
 
+<<<<<<< HEAD
         # Build isolated, sanitized prompt with optional goal/rank telemetry
         user_prompt = build_conversational_context_prompt(
             student_question=message,
@@ -871,6 +903,46 @@ async def ai_chat(
             "Explain academic concepts, study goals, and syllabus progress in clear, student-friendly language.\n"
             "Return valid JSON only."
         )
+=======
+        context_json = json.dumps(
+            student_context,
+            ensure_ascii=False,
+        )
+        # Generate the topic explanation using existing Gemini logic.
+        user_prompt = f"""
+        Answer the student's learning question clearly.
+
+        Verified student context:
+        {context_json}
+
+        Personalization rules:
+        - Use the student's goals when relevant.
+        - Never invent a leaderboard rank.
+        - Never claim a goal was achieved or failed without verified status.
+        - If leaderboard_rank is null, treat rank as unavailable.
+        - If goal_status is unknown, treat achievement status as unavailable.
+
+        Student question:
+        {message}
+
+        Return valid JSON only, using this structure:
+        {{
+            "explanation": "Detailed but easy-to-understand explanation",
+            "key_points": [
+                "Important point 1",
+                "Important point 2"
+            ],
+            "follow_up_suggestion": "A useful next question to explore"
+        }}
+        """
+
+        system_instruction = """
+        You are the AI learning assistant of Smart Learning Planner.
+        Explain academic concepts in simple, student-friendly language.
+        Use accurate information and practical examples.
+        Return valid JSON only.
+        """
+>>>>>>> origin/main
 
         response_text = generate_gemini_response(
             prompt=user_prompt,

@@ -18,7 +18,8 @@ import {
   Calendar,
   BookOpen,
   ArrowRight,
-  X
+  X,
+  Trophy
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/api";
 import AiAssistantDrawer from "@/components/AiAssistantDrawer";
@@ -203,6 +204,13 @@ export default function DashboardNav({ showBackToDashboard = false }: DashboardN
       icon: CalendarDays,
       active: pathname === "/dashboard",
       badge: null,
+    },
+    {
+      name: "Leaderboard",
+      href: "/dashboard/leaderboard",
+      icon: Trophy,
+      active: pathname.startsWith("/dashboard/leaderboard"),
+      badge: "Rankings",
     },
     {
       name: "Academic Analytics",

@@ -14,17 +14,30 @@ if _env_path.is_file():
     load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 
-from auth import verify_clerk_token
+from auth import verify_clerk_token, require_admin
 from database import get_db
 from routes.ai import router as ai_router, ai_chat, ChatRequest
 from routes.plans import router as plans_router
 from routes import export
 from routes.tasks import router as tasks_router
 from routes.recommendations import router as recommendations_router
-from routes.resources import router as resources_router
-from routes.analytics import router as analytics_router
+from routes.resources import (
+    router as resources_router,
+    admin_router as admin_resources_router,
+)
+from routes.analytics import (
+    router as analytics_router,
+    get_student_leaderboard_endpoint,
+)
 from routes.notifications import router as notifications_router
+<<<<<<< HEAD
 from routes.admin import router as admin_router
+=======
+from routes.admin import (
+    router as admin_management_router,
+    subjects_public_router,
+)
+>>>>>>> origin/main
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,9 +77,15 @@ app.include_router(export.router)
 app.include_router(tasks_router)
 app.include_router(recommendations_router)
 app.include_router(resources_router)
+app.include_router(admin_resources_router)
 app.include_router(analytics_router)
 app.include_router(notifications_router)
+<<<<<<< HEAD
 app.include_router(admin_router)
+=======
+app.include_router(admin_management_router)
+app.include_router(subjects_public_router)
+>>>>>>> origin/main
 
 
 # ============================================================
@@ -78,8 +97,55 @@ async def chat_direct_alias(
     payload: ChatRequest,
     user_data: dict = Depends(verify_clerk_token),
 ):
-    """Direct endpoint for POST /api/v1/chat delegating to ai_chat."""
+    """
+    Direct endpoint for POST /api/v1/chat.
+    Streams AI Assistant tokens in real-time using Server-Sent Events (SSE) by default (stream=True).
+    Supports fallback to full JSON when stream=False.
+    """
     return await ai_chat(payload, user_data)
+
+
+# ============================================================
+# DIRECT LEADERBOARD ALIAS ROUTE (GET /api/v1/leaderboard)
+# ============================================================
+
+@app.get("/api/v1/leaderboard", tags=["Leaderboard"])
+async def leaderboard_direct_alias(
+    limit: int = 50,
+    offset: int = 0,
+    semester: Optional[int] = None,
+    user_payload: dict = Depends(verify_clerk_token),
+):
+    """
+    Direct endpoint for GET /api/v1/leaderboard.
+    Returns the student leaderboard ranking peers by study hours, completion rates, and goal status.
+    """
+    return await get_student_leaderboard_endpoint(
+        limit=limit,
+        offset=offset,
+        semester=semester,
+        user_payload=user_payload,
+    )
+
+
+# ============================================================
+# DIRECT ADMIN SUBJECTS ROUTES
+# ============================================================
+
+@app.get("/api/v1/admin/subjects", tags=["Admin Subjects"])
+async def get_admin_subjects_alias(admin_data: dict = Depends(require_admin)):
+    from routes.analytics import get_admin_subjects
+    return await get_admin_subjects(admin_data)
+
+
+@app.post("/api/v1/admin/subjects", tags=["Admin Subjects"], status_code=201)
+async def create_admin_subject_alias(
+    payload: dict,
+    admin_data: dict = Depends(require_admin),
+):
+    from routes.analytics import create_admin_subject, SubjectCreateRequest
+    req = SubjectCreateRequest(**payload)
+    return await create_admin_subject(req, admin_data)
 
 
 # ============================================================
@@ -92,6 +158,7 @@ class ProfileCreateRequest(BaseModel):
     study_hours_per_day: float
     goals: Union[str, List[str]]
     subjects: List[str] = Field(default_factory=list)
+    goal_status: Optional[str] = "on_track"
 
 
 # ============================================================
@@ -189,6 +256,7 @@ async def create_or_update_profile(
             semester=payload.semester,
             goals=goals_list,
             subjects=subjects_list,
+            goal_status=payload.goal_status,
         )
 
         return {
