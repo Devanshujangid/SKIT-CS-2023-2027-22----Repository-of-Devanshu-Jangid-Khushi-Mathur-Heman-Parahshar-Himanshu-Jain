@@ -67,7 +67,7 @@ PROMPT_INJECTION_PATTERNS = [
     r"\b(repeat|print|show|output|reveal|display|leak|dump)\s+(your\s+)?(?:initial|original|verbatim|internal|system|\s)*(?:prompt|instructions?|system\s+message|rules?)\b",
     r"\bwhat\s+(?:are\s+your|is\s+your)\s+(?:initial|original|internal|system|\s)*(?:prompt|instructions?|rules?|system\s+message)\b",
     # Delimiter and tag spoofing
-    r"(</?(system|instruction|prompt|context|human|ai)>|\[/?(system|instruction|admin|override)\])",
+    r"(</?(system|instruction|prompt|context|human|ai|student_telemetry|telemetry)[^>]*>|\[/?(system|instruction|admin|override)[^\]]*\])",
     r"(\"\"\"\s*end\s+prompt\s*\"\"\"|```\s*system\s*```)",
     # Grandmother / persona social engineering
     r"\b(pretend\s+you\s+are|act\s+as)\s+(my\s+)?(grandma|grandmother|chef|baker|cook|entertainer)\b",
@@ -81,6 +81,7 @@ ACADEMIC_INTENT_PATTERNS = [
     r"\b(study|revision|review|schedule|priority|today|tomorrow|hours|deadline)\b",
     r"\b(quiz|test|mcq|practice|formula|theorem|definition|pseudocode)\b",
     r"\b(gate|mid-term|end-term|semester|cgpa|syllabus|curriculum|assignment)\b",
+    r"\b(goal|target\s+study\s+hours|leaderboard|rank|xp|streak|adherence|percentile)\b",
     r"\b(algorithm|data structure|complexity|big o|graph|dynamic programming)\b",
     r"\b(semaphore|mutex|spinlock|deadlock|starvation|paging|thrashing)\b",
     r"\b(tcp|udp|ip|dns|dhcp|bgp|ospf|subnet|socket)\b",
@@ -279,3 +280,119 @@ def check_academic_scope(
         refusal_message="I'm here to help you study and prepare for your exams. Please ask a question related to your syllabus or study plan.",
         suggested_academic_topics=enrolled_subjects or ["Operating Systems", "Computer Networks"],
     )
+
+
+# ===========================================================================
+# 3. Context-Window Sanitization & Goal/Rank Injection Guardrails
+# ===========================================================================
+
+_CONTROL_DELIMITER_PATTERN = re.compile(
+    r"(</?[a-zA-Z_][a-zA-Z0-9_-]*[^>]*>|\[/?(?:SYSTEM|INSTRUCTION|ADMIN|OVERRIDE)[^\]]*\]|```|\"\"\")",
+    re.IGNORECASE,
+)
+
+
+def sanitize_telemetry_text(value: Any, max_length: int = 240) -> str:
+    """
+    Sanitizes untrusted string fields (e.g., student goals, display names,
+    primary focus) before injecting them into the AI assistant's context window.
+    Neutralizes XML/markdown control delimiters and collapses newlines.
+    """
+    if value is None:
+        return ""
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    text = _CONTROL_DELIMITER_PATTERN.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:max_length]
+
+
+def _iter_context_strings(payload: Any) -> List[str]:
+    """Recursively collects string values from goal/rank context objects or dicts."""
+    collected: List[str] = []
+    if payload is None:
+        return collected
+    if isinstance(payload, str):
+        if payload.strip():
+            collected.append(payload.strip())
+    elif isinstance(payload, dict):
+        for val in payload.values():
+            collected.extend(_iter_context_strings(val))
+    elif isinstance(payload, (list, tuple, set)):
+        for item in payload:
+            collected.extend(_iter_context_strings(item))
+    elif hasattr(payload, "model_dump"):
+        collected.extend(_iter_context_strings(payload.model_dump()))
+    elif hasattr(payload, "to_dict"):
+        collected.extend(_iter_context_strings(payload.to_dict()))
+    return collected
+
+
+def check_context_window_safety(
+    query: str,
+    goal_context: Optional[Any] = None,
+    rank_context: Optional[Any] = None,
+    enrolled_subjects: Optional[List[str]] = None,
+    active_weak_topics: Optional[List[str]] = None,
+) -> GuardrailCheckResult:
+    """
+    Validates BOTH the student's conversational query AND any goal/leaderboard-rank
+    telemetry attached to the AI Assistant's context window against prompt injection
+    and non-academic domain hijacking.
+    """
+    # 1. Evaluate the direct user query first
+    query_result = check_academic_scope(
+        query=query,
+        enrolled_subjects=enrolled_subjects,
+        active_weak_topics=active_weak_topics,
+    )
+    if not query_result.is_academic:
+        return query_result
+
+    # 2. Scan all strings inside goal_context and rank_context for indirect injections
+    context_strings = _iter_context_strings(goal_context) + _iter_context_strings(rank_context)
+    for raw_text in context_strings:
+        lower_text = raw_text.lower()
+
+        # Check for prompt injection / delimiter spoofing in stored goal or rank fields
+        matched_injections = [
+            match.group(0)
+            for pattern in PROMPT_INJECTION_PATTERNS
+            if (match := re.search(pattern, lower_text)) is not None
+        ]
+        if matched_injections:
+            return GuardrailCheckResult(
+                is_academic=False,
+                query=query.strip(),
+                detected_category="context_injection_refusal",
+                matched_patterns=matched_injections,
+                refusal_reason="prompt_injection_attempt",
+                refusal_message=(
+                    "Security Alert: Instruction override or delimiter tampering detected in "
+                    "goal/leaderboard context telemetry. Conversational guardrails remain locked."
+                ),
+                suggested_academic_topics=enrolled_subjects or ["Operating Systems", "Computer Networks"],
+            )
+
+        # Check for non-academic payloads smuggled into goal/rank strings (respecting CS exemptions)
+        has_exemption = any(re.search(p, lower_text) for p in ACADEMIC_EXEMPTION_PATTERNS)
+        if not has_exemption:
+            matched_non_academic = [
+                match.group(0)
+                for pattern in NON_ACADEMIC_DOMAIN_PATTERNS
+                if (match := re.search(pattern, lower_text)) is not None
+            ]
+            if matched_non_academic:
+                return GuardrailCheckResult(
+                    is_academic=False,
+                    query=query.strip(),
+                    detected_category="context_non_academic_refusal",
+                    matched_patterns=matched_non_academic,
+                    refusal_reason="non_academic_domain",
+                    refusal_message=(
+                        "Context Security Policy: Non-academic content detected in student context metadata. "
+                        "Please keep goals and focus topics strictly academic."
+                    ),
+                    suggested_academic_topics=enrolled_subjects or ["Operating Systems", "Computer Networks"],
+                )
+
+    return query_result
