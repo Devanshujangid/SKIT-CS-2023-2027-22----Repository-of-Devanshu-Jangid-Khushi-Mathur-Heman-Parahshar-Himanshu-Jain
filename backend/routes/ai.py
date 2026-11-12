@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from services.recommendation_service import recommendation_service
 from services.assistant_guardrail import check_academic_scope
 from services.chat_stream_service import stream_chat_response
-
+from services.student_context import get_student_context
 from database import (
     get_db,
     get_or_create_user,
@@ -861,10 +861,29 @@ async def ai_chat(
                 "recommendations": [],
                 "recommendation_count": 0,
             }
+                # Fetch verified student personalization context.
+        student_context = await run_in_threadpool(
+            get_student_context,
+            clerk_id,
+        )
 
+        context_json = json.dumps(
+            student_context,
+            ensure_ascii=False,
+        )
         # Generate the topic explanation using existing Gemini logic.
         user_prompt = f"""
         Answer the student's learning question clearly.
+
+        Verified student context:
+        {context_json}
+
+        Personalization rules:
+        - Use the student's goals when relevant.
+        - Never invent a leaderboard rank.
+        - Never claim a goal was achieved or failed without verified status.
+        - If leaderboard_rank is null, treat rank as unavailable.
+        - If goal_status is unknown, treat achievement status as unavailable.
 
         Student question:
         {message}
