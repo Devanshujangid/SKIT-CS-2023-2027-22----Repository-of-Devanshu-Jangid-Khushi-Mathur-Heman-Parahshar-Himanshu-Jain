@@ -26,7 +26,9 @@ if str(BACKEND_DIR) not in sys.path:
 from auth import require_admin
 from fastapi import HTTPException
 from pydantic import ValidationError
+from main import leaderboard_direct_alias
 from routes.ai import ChatRequest, ai_chat
+from routes.analytics import update_student_goal_status_endpoint
 from routes.notifications import (
     admin_broadcast_notification,
     create_notification,
@@ -37,9 +39,33 @@ from routes.notifications import (
     mark_notification_as_read,
     trigger_daily_notification_dispatch,
 )
+from routes.resources import (
+    create_admin_resource,
+    update_admin_resource,
+    delete_admin_resource,
+    list_admin_resources,
+)
+from routes.admin import (
+    list_admin_students,
+    update_student_account_status,
+    delete_student_account,
+    create_admin_subject,
+    list_admin_subjects,
+    update_admin_subject,
+    delete_admin_subject,
+    admin_notifications_direct,
+    trigger_leaderboard_refresh,
+)
 from schemas.notifications import (
     AdminBroadcastNotificationRequest,
     NotificationCreateRequest,
+)
+from schemas.leaderboard import UpdateGoalStatusRequest
+from schemas.resources import ResourceCreateRequest, ResourceUpdateRequest
+from schemas.admin import (
+    StudentStatusUpdateRequest,
+    SubjectCreateRequest,
+    SubjectUpdateRequest,
 )
 from services.chat_stream_service import stream_chat_response
 
@@ -495,23 +521,400 @@ class PostmanSmokeTestRunner:
             self.record("Admin Broadcast", "GET /api/v1/notifications/admin/broadcasts", "GET", "/api/v1/notifications/admin/broadcasts", False, str(e), 0)
 
     # =========================================================================
+    # Group 4: Leaderboard Endpoints
+    # =========================================================================
+
+    @patch("routes.analytics.get_db")
+    def test_get_leaderboard(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid}]
+            )
+            mock_rpc_data = [
+                {
+                    "rank": 1,
+                    "user_id": self.student_uuid,
+                    "display_name": "stu***@skit.ac.in",
+                    "semester": 5,
+                    "target_hours_per_day": 3.0,
+                    "goal_status": "ahead",
+                    "calculated_goal_status": "ahead",
+                    "primary_goals": ["GATE 2027"],
+                    "total_tasks": 10,
+                    "completed_tasks": 9,
+                    "planned_study_hours": 15.0,
+                    "actual_study_hours": 13.5,
+                    "completion_rate": 90.0,
+                }
+            ]
+            mock_db.rpc.return_value.execute.return_value = MagicMock(data=mock_rpc_data)
+
+            res = run_async(leaderboard_direct_alias(limit=10, offset=0, user_payload=self.student_data))
+            assert res["success"] is True
+            assert len(res["leaderboard"]) == 1
+            assert res["leaderboard"][0]["rank"] == 1
+
+            dt = (time.time() - t0) * 1000
+            self.record("Leaderboard", "GET /api/v1/leaderboard", "GET", "/api/v1/leaderboard", True, "200 OK | Dense rank & peer standings retrieved", dt)
+        except Exception as e:
+            self.record("Leaderboard", "GET /api/v1/leaderboard", "GET", "/api/v1/leaderboard", False, str(e), 0)
+
+    @patch("routes.analytics.get_db")
+    def test_patch_goal_status(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid}]
+            )
+            mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"user_id": self.student_uuid, "goal_status": "ahead"}]
+            )
+
+            req = UpdateGoalStatusRequest(goal_status="ahead")
+            res = run_async(update_student_goal_status_endpoint(payload=req, user_payload=self.student_data))
+            assert res["success"] is True
+            assert res["goal_status"] == "ahead"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Leaderboard", "PATCH /api/v1/analytics/goal-status", "PATCH", "/api/v1/analytics/goal-status", True, "200 OK | Student goal_status updated to 'ahead'", dt)
+        except Exception as e:
+            self.record("Leaderboard", "PATCH /api/v1/analytics/goal-status", "PATCH", "/api/v1/analytics/goal-status", False, str(e), 0)
+
+    # =========================================================================
+    # Group 5: Admin Resources Endpoints
+    # =========================================================================
+
+    @patch("routes.resources.get_db")
+    def test_post_admin_resource(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": "admin-uuid-1"}]
+            )
+            created_mock = {
+                "id": "res-uuid-1",
+                "title": "Operating Systems: Three Easy Pieces",
+                "url": "https://pages.cs.wisc.edu/~remzi/OSTEP/",
+                "category": "book",
+                "is_active": True,
+            }
+            mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[created_mock])
+
+            req = ResourceCreateRequest(
+                title="Operating Systems: Three Easy Pieces",
+                url="https://pages.cs.wisc.edu/~remzi/OSTEP/",
+                category="book",
+                subject="Operating Systems",
+            )
+            res = run_async(create_admin_resource(payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["resource"]["id"] == "res-uuid-1"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Resources", "POST /api/v1/admin/resources", "POST", "/api/v1/admin/resources", True, "201 Created | Learning resource cataloged", dt)
+        except Exception as e:
+            self.record("Admin Resources", "POST /api/v1/admin/resources", "POST", "/api/v1/admin/resources", False, str(e), 0)
+
+    @patch("routes.resources.get_db")
+    def test_patch_admin_resource(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": "res-uuid-1"}]
+            )
+            mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "res-uuid-1", "rating": 5.0}]
+            )
+
+            req = ResourceUpdateRequest(rating=5.0)
+            res = run_async(update_admin_resource(id="res-uuid-1", payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["resource"]["rating"] == 5.0
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Resources", "PATCH /api/v1/admin/resources/{id}", "PATCH", "/api/v1/admin/resources/res-uuid-1", True, "200 OK | Learning resource rating updated", dt)
+        except Exception as e:
+            self.record("Admin Resources", "PATCH /api/v1/admin/resources/{id}", "PATCH", "/api/v1/admin/resources/res-uuid-1", False, str(e), 0)
+
+    @patch("routes.resources.get_db")
+    def test_delete_admin_resource(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": "res-uuid-1", "title": "OSTEP"}]
+            )
+            mock_db.table.return_value.delete.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "res-uuid-1"}]
+            )
+
+            res = run_async(delete_admin_resource(id="res-uuid-1", admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["id"] == "res-uuid-1"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Resources", "DELETE /api/v1/admin/resources/{id}", "DELETE", "/api/v1/admin/resources/res-uuid-1", True, "200 OK | Learning resource removed from catalog", dt)
+        except Exception as e:
+            self.record("Admin Resources", "DELETE /api/v1/admin/resources/{id}", "DELETE", "/api/v1/admin/resources/res-uuid-1", False, str(e), 0)
+
+    @patch("routes.resources.get_db")
+    def test_get_admin_resources(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.order.return_value.range.return_value.execute.return_value = MagicMock(
+                data=[{"id": "r1", "title": "Resource 1"}, {"id": "r2", "title": "Resource 2"}]
+            )
+
+            res = run_async(list_admin_resources(category=None, limit=20, offset=0, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["count"] == 2
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Resources", "GET /api/v1/admin/resources", "GET", "/api/v1/admin/resources", True, "200 OK | Admin resource catalog audit list returned", dt)
+        except Exception as e:
+            self.record("Admin Resources", "GET /api/v1/admin/resources", "GET", "/api/v1/admin/resources", False, str(e), 0)
+
+    # =========================================================================
+    # Group 6: Admin Students Endpoints
+    # =========================================================================
+
+    @patch("routes.admin.get_db")
+    def test_get_admin_students(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid, "clerk_id": "c1", "email": "s1@skit.ac.in", "role": "student", "status": "active"}]
+            )
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"semester": 5, "study_hours_per_day": 3.0, "goals": [], "subjects": []}]
+            )
+
+            res = run_async(list_admin_students(status_filter=None, semester=None, search=None, limit=20, offset=0, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["total_students"] >= 1
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Students", "GET /api/v1/admin/students", "GET", "/api/v1/admin/students", True, "200 OK | Enrolled student roster with status retrieved", dt)
+        except Exception as e:
+            self.record("Admin Students", "GET /api/v1/admin/students", "GET", "/api/v1/admin/students", False, str(e), 0)
+
+    @patch("routes.admin.get_db")
+    def test_patch_student_status(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid, "role": "student", "status": "active"}]
+            )
+            mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid, "status": "suspended"}]
+            )
+
+            req = StudentStatusUpdateRequest(status="suspended", reason="Account audit")
+            res = run_async(update_student_account_status(id=self.student_uuid, payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["status"] == "suspended"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Students", "PATCH /api/v1/admin/students/{id}/status", "PATCH", f"/api/v1/admin/students/{self.student_uuid}/status", True, "200 OK | Account status updated to 'suspended'", dt)
+        except Exception as e:
+            self.record("Admin Students", "PATCH /api/v1/admin/students/{id}/status", "PATCH", f"/api/v1/admin/students/{self.student_uuid}/status", False, str(e), 0)
+
+    @patch("routes.admin.get_db")
+    def test_delete_student_account(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid, "email": "s1@skit.ac.in", "role": "student"}]
+            )
+            mock_db.table.return_value.delete.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": self.student_uuid}]
+            )
+
+            res = run_async(delete_student_account(id=self.student_uuid, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["id"] == self.student_uuid
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Students", "DELETE /api/v1/admin/students/{id}", "DELETE", f"/api/v1/admin/students/{self.student_uuid}", True, "200 OK | Student account permanently deleted with cascade", dt)
+        except Exception as e:
+            self.record("Admin Students", "DELETE /api/v1/admin/students/{id}", "DELETE", f"/api/v1/admin/students/{self.student_uuid}", False, str(e), 0)
+
+    # =========================================================================
+    # Group 7: Admin Subjects Endpoints
+    # =========================================================================
+
+    @patch("routes.admin.get_db")
+    def test_post_admin_subject(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[]
+            )
+            mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1", "code": "5CS4-01", "name": "Operating Systems", "semester": 5, "credits": 3.0}]
+            )
+
+            req = SubjectCreateRequest(code="5CS4-01", name="Operating Systems", semester=5, credits=3.0)
+            res = run_async(create_admin_subject(payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["subject"]["code"] == "5CS4-01"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Subjects", "POST /api/v1/admin/subjects", "POST", "/api/v1/admin/subjects", True, "201 Created | Curriculum subject registered", dt)
+        except Exception as e:
+            self.record("Admin Subjects", "POST /api/v1/admin/subjects", "POST", "/api/v1/admin/subjects", False, str(e), 0)
+
+    @patch("routes.admin.get_db")
+    def test_get_admin_subjects(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.order.return_value.order.return_value.range.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1", "code": "5CS4-01", "name": "Operating Systems"}]
+            )
+
+            res = run_async(list_admin_subjects(limit=20, offset=0, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["total"] >= 1
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Subjects", "GET /api/v1/admin/subjects", "GET", "/api/v1/admin/subjects", True, "200 OK | Global subjects catalog retrieved", dt)
+        except Exception as e:
+            self.record("Admin Subjects", "GET /api/v1/admin/subjects", "GET", "/api/v1/admin/subjects", False, str(e), 0)
+
+    @patch("routes.admin.get_db")
+    def test_patch_admin_subject(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1", "code": "5CS4-01"}]
+            )
+            mock_db.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1", "name": "Advanced Operating Systems", "credits": 4.0}]
+            )
+
+            req = SubjectUpdateRequest(name="Advanced Operating Systems", credits=4.0)
+            res = run_async(update_admin_subject(id="sub-1", payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["subject"]["name"] == "Advanced Operating Systems"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Subjects", "PATCH /api/v1/admin/subjects/{id}", "PATCH", "/api/v1/admin/subjects/sub-1", True, "200 OK | Subject curriculum credits updated", dt)
+        except Exception as e:
+            self.record("Admin Subjects", "PATCH /api/v1/admin/subjects/{id}", "PATCH", "/api/v1/admin/subjects/sub-1", False, str(e), 0)
+
+    @patch("routes.admin.get_db")
+    def test_delete_admin_subject(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1", "name": "Operating Systems"}]
+            )
+            mock_db.table.return_value.delete.return_value.eq.return_value.execute.return_value = MagicMock(
+                data=[{"id": "sub-1"}]
+            )
+
+            res = run_async(delete_admin_subject(id="sub-1", admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["id"] == "sub-1"
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Subjects", "DELETE /api/v1/admin/subjects/{id}", "DELETE", "/api/v1/admin/subjects/sub-1", True, "200 OK | Subject deleted from curriculum", dt)
+        except Exception as e:
+            self.record("Admin Subjects", "DELETE /api/v1/admin/subjects/{id}", "DELETE", "/api/v1/admin/subjects/sub-1", False, str(e), 0)
+
+    # =========================================================================
+    # Group 8: Direct Admin Notifications & Midnight Leaderboard Cron Trigger
+    # =========================================================================
+
+    @patch("routes.notifications.get_db")
+    def test_post_admin_notifications_direct(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_users = [{"id": self.student_uuid, "email": "s1@skit.ac.in", "role": "student"}]
+            mock_db.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=mock_users)
+            mock_db.table.return_value.insert.return_value.execute.return_value = MagicMock(data=mock_users)
+
+            req = AdminBroadcastNotificationRequest(
+                title="Exam Schedule Published",
+                message="Final semester examination schedule is now available.",
+                type="exam",
+                target_role="student",
+            )
+            res = run_async(admin_notifications_direct(payload=req, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["recipient_count"] == 1
+
+            dt = (time.time() - t0) * 1000
+            self.record("Admin Broadcast", "POST /api/v1/admin/notifications", "POST", "/api/v1/admin/notifications", True, "201 Created | Alert written directly to notifications table", dt)
+        except Exception as e:
+            self.record("Admin Broadcast", "POST /api/v1/admin/notifications", "POST", "/api/v1/admin/notifications", False, str(e), 0)
+
+    @patch("cron.daily_leaderboard_job.get_db")
+    def test_post_leaderboard_refresh_cron(self, mock_get_db):
+        t0 = time.time()
+        try:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_db.table.return_value.select.return_value.execute.return_value = MagicMock(
+                data=[{"user_id": self.student_uuid, "rank": 1}]
+            )
+
+            res = run_async(trigger_leaderboard_refresh(dry_run=True, admin_payload=self.admin_data))
+            assert res["success"] is True
+            assert res["result"]["dry_run"] is True
+
+            dt = (time.time() - t0) * 1000
+            self.record("Leaderboard Cron", "POST /api/v1/admin/leaderboard/refresh", "POST", "/api/v1/admin/leaderboard/refresh", True, "200 OK | Midnight evaluation trigger executed", dt)
+        except Exception as e:
+            self.record("Leaderboard Cron", "POST /api/v1/admin/leaderboard/refresh", "POST", "/api/v1/admin/leaderboard/refresh", False, str(e), 0)
+
+    # =========================================================================
     # Run All & Generate Formatted Report
     # =========================================================================
 
     def run_all(self):
         print("=" * 80)
-        print("POSTMAN TEST RUNNER: CHAT & NOTIFICATIONS ENDPOINTS")
-        print("Collection: Smart Learning Planner - Chat & Notifications API")
+        print("POSTMAN TEST RUNNER: COMPLETE BACKEND API SUITE")
+        print("Collection: Smart Learning Planner - Core & Admin APIs")
         print("Spec Version: Postman Collection v2.1.0")
         print("Timestamp: " + datetime.now(timezone.utc).isoformat())
         print("=" * 80)
 
-        # Execute tests (all 14 collection items)
+        # 1. AI Chat Endpoints
         self.test_chat_sse_stream()
         self.test_chat_json_payload()
         self.test_chat_guardrail_refusal()
         self.test_chat_short_prompt_validation()
 
+        # 2. Student Notification CRUD & Daily Dispatch
         self.test_get_notifications()
         self.test_get_notifications_unread_only()
         self.test_post_notification()
@@ -520,9 +923,35 @@ class PostmanSmokeTestRunner:
         self.test_delete_notification()
         self.test_dispatch_daily()
 
+        # 3. Admin Notification Broadcast & Rejection
         self.test_admin_broadcast_success()
         self.test_admin_broadcast_student_forbidden()
         self.test_get_admin_broadcast_history()
+
+        # 4. Leaderboard & Goal Status
+        self.test_get_leaderboard()
+        self.test_patch_goal_status()
+
+        # 5. Admin Resources
+        self.test_post_admin_resource()
+        self.test_patch_admin_resource()
+        self.test_delete_admin_resource()
+        self.test_get_admin_resources()
+
+        # 6. Admin Students
+        self.test_get_admin_students()
+        self.test_patch_student_status()
+        self.test_delete_student_account()
+
+        # 7. Admin Subjects
+        self.test_post_admin_subject()
+        self.test_get_admin_subjects()
+        self.test_patch_admin_subject()
+        self.test_delete_admin_subject()
+
+        # 8. Admin Notifications & Midnight Cron Trigger
+        self.test_post_admin_notifications_direct()
+        self.test_post_leaderboard_refresh_cron()
 
         # Print formatted report
         print(f"\n{'#':<3} | {'METHOD':<6} | {'ENDPOINT':<45} | {'STATUS':<6} | {'LATENCY':<8}")
