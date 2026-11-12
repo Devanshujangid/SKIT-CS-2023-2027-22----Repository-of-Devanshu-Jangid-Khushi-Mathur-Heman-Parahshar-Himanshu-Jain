@@ -913,6 +913,148 @@ The implementation is ready to be committed and pushed.
 4. Regression Verification:
    - Executed existing unit test suites (`test_notifications.py`, `test_notification_engine.py`, `test_chat_streaming.py`): **29 / 29 unit tests passed (100% in 0.073s)**.
 
+---
+
+## Task – Leaderboard SQL Aggregation & Goal Status Tracking (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Designed and engineered the SQL Aggregation Logic for the Student Leaderboard:
+   - Migration file: `backend/migration/leaderboard_and_goal_status.sql`
+   - Master Schema: Updated `backend/schema.sql` with new columns, view, and stored procedure.
+   - **Ranking Window Function**: Implemented deterministic `DENSE_RANK() OVER (ORDER BY s.actual_study_hours DESC, s.completion_rate DESC, s.completed_tasks DESC)` to rank students by actual completed study hours, completion rates, and finished tasks.
+   - **Leaderboard Aggregation View (`public.v_student_leaderboard`)**: Aggregates planned study hours, verified completed study hours, total assigned tasks, finished tasks, completion rate percentage, and privacy-preserving masked email display names (`ali***@skit.ac.in`).
+   - **Stored Procedure (`public.get_student_leaderboard`)**: High-performance parameterized RPC supporting pagination (`p_limit`, `p_offset`) and cohort filtering (`p_semester`).
+
+2. Schema Evolution & `goal_status` Columns:
+   - Added `goal_status VARCHAR(50) DEFAULT 'on_track'` to `public.student_profiles` with check constraint (`'ahead'`, `'on_track'`, `'behind'`, `'completed'`, `'paused'`).
+   - Added `goal_status` to `public.study_plans` for plan-specific tracking.
+   - Added index `idx_student_profiles_goal_status` for fast status queries.
+   - Designed dual goal status architecture:
+     - `goal_status`: Persistent student preference / self-assigned progress state.
+     - `calculated_goal_status`: Dynamically evaluated momentum status based on study metrics (`'not_started'` if 0 tasks, `'ahead'` if completion rate >= 80%, `'on_track'` if >= 50%, and `'behind'` if < 50%).
+
+3. Implemented Backend Endpoints & Schemas:
+   - `GET /api/v1/analytics/leaderboard`: Returns paginated student rankings, semester filtering, and automatically pinpoints the calling student's position in `current_user_rank`. Includes seamless application-level aggregation fallback if RPC is not yet applied.
+   - `PATCH /api/v1/analytics/goal-status`: Allows students to update their persistent study goal status with strict validation.
+   - Pydantic schemas in `backend/schemas/leaderboard.py`: `LeaderboardEntry`, `LeaderboardResponse`, `UpdateGoalStatusRequest`, and `UpdateGoalStatusResponse`.
+   - Updated `ProfileCreateRequest` and `profile_service.py` to persist `goal_status`.
+
+4. Comprehensive Automated Testing:
+   - Authored test suite `backend/tests/test_leaderboard.py` covering:
+     - Ranking order and tie-breaking using dense ranking.
+     - Calculated goal status transitions (`not_started`, `ahead`, `on_track`, `behind`).
+     - Schema validation (rejection of invalid goal status values).
+     - Semester filtering and pagination.
+     - Supabase RPC execution and fallback table aggregation.
+     - Goal status update endpoint.
+   - Results: **8 / 8 tests passed (100% in 0.024s)**.
+   - Regression verification: **60 / 60 full backend unit tests passed in 0.306s**.
+
+---
+
+## Task – Top-Level Leaderboard & Admin Resources Management APIs (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Implemented Top-Level Leaderboard Endpoint:
+   - Route: `GET /api/v1/leaderboard` in `backend/main.py`
+   - Supports query filters: `limit` (1..100, default 50), `offset` (default 0), and `semester` (1..8).
+   - Enforces Clerk authentication via `verify_clerk_token` / `require_student`.
+   - Returns full `LeaderboardResponse` payload with sorted student rankings, dense ranks, dual goal statuses (`goal_status` and `calculated_goal_status`), and `current_user_rank`.
+
+2. Engineered Database Schema for Curated Learning Resources:
+   - Migration file: `backend/migration/learning_resources.sql`
+   - Master schema: Updated `backend/schema.sql` with `public.learning_resources` table and indexes (`category`, `subject`, `is_active`).
+   - Implemented Row Level Security (RLS) policies:
+     - Public/authenticated read access for active resources (`is_active = TRUE`).
+     - Restricted full CRUD mutation permissions to users with `role = 'admin'`.
+
+3. Authored Pydantic Schemas for Resources:
+   - File: `backend/schemas/resources.py`
+   - `ResourceCreateRequest`: Validates title (2..255 chars), URL (HTTP/HTTPS scheme), category (`course`, `video`, `book`, `documentation`, `tool`, `article`), difficulty (`beginner`, `intermediate`, `advanced`, `all_levels`), rating (0.0..5.0), and tags.
+   - `ResourceUpdateRequest`: Flexible partial update model for resource attributes.
+   - `ResourceResponse` and `ResourceListResponse`.
+   - Exported in `backend/schemas/__init__.py`.
+
+4. Built Admin Resources Management Endpoints:
+   - File: `backend/routes/resources.py` (`admin_router`, prefix `/api/v1/admin/resources`)
+   - `POST /api/v1/admin/resources`: Creates new curated learning resource (HTTP 201 Created), strictly protected by `require_admin` (HTTP 403 Forbidden for students).
+   - `PATCH /api/v1/admin/resources/{id}`: Partially updates learning resource metadata (HTTP 200 OK) with 404 validation for missing resource IDs.
+   - `DELETE /api/v1/admin/resources/{id}`: Deletes learning resource from catalog (HTTP 200 OK) with 404 validation.
+   - `GET /api/v1/admin/resources`: Administrative catalog audit listing all active/inactive items.
+   - `GET /api/v1/resources`: Student catalog browsing endpoint listing active learning resources.
+   - Registered `admin_resources_router` in `backend/main.py`.
+
+5. Automated Testing & Verification:
+   - Authored test suite `backend/tests/test_admin_resources.py` covering:
+     - Direct `GET /api/v1/leaderboard` invocation.
+     - Admin resource creation (201 Created).
+     - RBAC enforcement rejecting student tokens (403 Forbidden).
+     - Schema validation (rejection of non-HTTP URLs and invalid categories).
+     - Resource updates (200 OK) and 404 handling.
+     - Resource deletion (200 OK) and 404 handling.
+     - Admin and student catalog listing queries.
+   - Results: **10 / 10 tests passed (100% in 0.026s)**.
+   - Full regression verification: **70 / 70 unit tests passed (100% in 0.130s)**.
+
+---
+
+## Task – Admin Student Account Controls, Global Subjects, Leaderboard Midnight Cron & Performance Indexes (Heman Parashar - Backend/DB)
+
+### Work Done
+
+1. Engineered Admin Student Account Controls (`/api/v1/admin/students`):
+   - `GET /api/v1/admin/students`: Lists student roster with account status (`active`, `suspended`), enrolled semester, daily study hours, active study plan status, total tasks, and completion rate.
+   - `PATCH /api/v1/admin/students/{id}/status`: Suspends or re-activates student accounts. Enforces safeguard preventing suspension of administrative accounts.
+   - `DELETE /api/v1/admin/students/{id}`: Permanently deletes student account with cascading cleanup of profiles, plans, tasks, and notifications.
+   - Schema evolution: Added `status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending'))` to `public.users`.
+
+2. Global University Subjects Catalog (`/api/v1/admin/subjects` & `/api/v1/subjects`):
+   - Created `public.subjects` table in database with curriculum fields (`code`, `name`, `semester`, `department`, `credits`, `is_active`).
+   - `POST /api/v1/admin/subjects`: Creates new curriculum subject (checks for duplicate course code).
+   - `PATCH /api/v1/admin/subjects/{id}`: Partially updates subject details or toggles active status.
+   - `DELETE /api/v1/admin/subjects/{id}`: Deletes subject from university catalog.
+   - `GET /api/v1/admin/subjects`: Administrative view of all subjects.
+   - `GET /api/v1/subjects`: Student-facing endpoint returning active curriculum subjects for onboarding and study planning.
+
+3. Wired Admin Notification Sender to Notifications Table:
+   - Added direct endpoint aliases `/api/v1/admin/notifications` and `/api/v1/admin/notifications/broadcast` mapping directly into Supabase `public.notifications` table.
+   - Supports targeted audience broadcasts (`target_role = 'student' | 'all'`, or explicit `target_user_ids`).
+
+4. Midnight Leaderboard Recalculation Cron & Database Procedure:
+   - Created cached ranking table: `public.leaderboard_ranks` with indexed `rank` and `semester`.
+   - Stored procedure `public.refresh_leaderboard_rankings()`: Re-evaluates student study hours, completed tasks, completion rate, dynamic goal status, and dense ranks for all active students.
+   - Database Cron: Scheduled via `pg_cron` at midnight every day (`0 0 * * *`).
+   - Python Cron Runner: Created executable CLI script `backend/cron/daily_leaderboard_job.py` (`--dry-run` supported).
+   - API Trigger: `POST /api/v1/admin/leaderboard/refresh` allowing manual on-demand recalculation.
+
+5. High-Performance PostgreSQL Indexes for Growing Student Base:
+   - Migration file: `backend/migration/admin_controls_and_leaderboard_cron.sql`.
+   - Master schema: Updated `backend/schema.sql`.
+   - Indexes added:
+     - `idx_users_role_status` on `public.users(role, status)`
+     - `idx_tasks_user_id_completed` on `public.tasks(user_id, is_completed)`
+     - `idx_tasks_scheduled_date` on `public.tasks(scheduled_date)`
+     - `idx_tasks_user_scheduled` on `public.tasks(user_id, scheduled_date)`
+     - `public.study_sessions` table with `idx_study_sessions_user_completed` and `idx_study_sessions_session_date`
+     - `idx_leaderboard_ranks_rank` and `idx_leaderboard_ranks_semester` on `public.leaderboard_ranks`
+
+6. Comprehensive Postman Smoke Test Suite Execution:
+   - Postman Collection: `postman/Smart_Learning_Planner_Leaderboard_and_Admin.postman_collection.json`.
+   - Test Runner: Updated `backend/tests/run_postman_smoke_tests.py` covering all 29 core, leaderboard, and admin endpoints.
+   - Result: **29 / 29 test cases passed (100.0% in 0.14s)**.
+   - Regression verification: **81 / 81 backend unit tests passed in 0.161s**.
+
+7. Supabase Migration Schema Evolution & Security Hardening:
+   - Prerequisite Columns: Explicitly added `is_completed BOOLEAN NOT NULL DEFAULT FALSE`, `scheduled_date DATE`, `plan_session_key TEXT`, `completed_at TIMESTAMPTZ`, and `updated_at TIMESTAMPTZ` with `ADD COLUMN IF NOT EXISTS` on `public.tasks` before view creation or indexing.
+   - Backfill: Automated `is_completed = TRUE` backfill where `completed_at IS NOT NULL`.
+   - View Robustness: Updated `v_student_leaderboard` completion filtering to defensively check `(t.is_completed = TRUE OR t.completed_at IS NOT NULL)`.
+   - Privilege & Security Hardening: Revoked execute permissions on `refresh_leaderboard_rankings()` from `PUBLIC`, `authenticated`, and `anon`. Restricted execution exclusively to `service_role`.
+   - Student Privacy Protection: Removed unmasked `email` column from `public.leaderboard_ranks` table, storing only privacy-preserving `display_name` (e.g. `joh***@skit.ac.in`) with Row Level Security (RLS) enabled.
+
+
+
 
 
 
