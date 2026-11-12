@@ -223,6 +223,8 @@ The deterministic diagnostic rules, profile updates, and analytics APIs are vali
 | **Profile Hours Update** | [test_profile_update_isolation.py](file:///e:/FinalYear/backend/tests/test_profile_update_isolation.py) | **17/17 (100%)** | Hours reduction detection, overloaded day calculation, adaptive rebalance trigger, FastAPI isolation |
 | **RBAC & Analytics** | [test_analytics_and_roles.py](file:///e:/FinalYear/backend/tests/test_analytics_and_roles.py) | **10/10 (100%)** | Role separation (`student` vs `admin`), 403 Forbidden enforcement on admin endpoints, roster retrieval |
 | **Analytics E2E** | [test_analytics_settings_e2e.py](file:///e:/FinalYear/backend/tests/test_analytics_settings_e2e.py) | **7/7 (100%)** | Scheduled vs actual hours calculation, subject distribution, weekly performance, diagnostic embedding |
+| **Admin & Leaderboard Schemas** | [test_admin_and_leaderboard_schemas.py](file:///e:/FinalYear/backend/tests/test_admin_and_leaderboard_schemas.py) | **10/10 (100%)** | `AdminCreateResource`, `AdminUpdateStudent`, URL/bounds validation, `LeaderboardResponse` rank integrity |
+| **Admin RBAC Isolation** | [test_admin_rbac_isolation.py](file:///e:/FinalYear/backend/tests/test_admin_rbac_isolation.py) | **7/7 (49 subtests)** | Real `require_admin` dependency blocks students (403), DB fallback, fail-closed safety, zero DB mutations |
 
 ---
 
@@ -377,6 +379,10 @@ Access control is enforced in [backend/auth.py](file:///e:/FinalYear/backend/aut
 | :--- | :---: | :--- | :---: | :---: | :---: |
 | `/api/v1/analytics/summary` | `GET` | `require_student` (`student`, `admin`) | 200 OK | 200 OK | 401 Unauthorized |
 | `/api/v1/analytics/admin/roster` | `GET` | `require_admin` (`admin` ONLY) | **403 Forbidden** | **200 OK** | 401 Unauthorized |
+| `/api/v1/admin/resources` | `GET`, `POST` | `require_admin` (`admin` ONLY) | **403 Forbidden** | **200 OK / 201 Created** | 401 Unauthorized |
+| `/api/v1/admin/resources/{resource_id}` | `PATCH`, `DELETE` | `require_admin` (`admin` ONLY) | **403 Forbidden** | **200 OK** | 401 Unauthorized |
+| `/api/v1/admin/students` | `GET`, `POST` | `require_admin` (`admin` ONLY) | **403 Forbidden** | **200 OK / 201 Created** | 401 Unauthorized |
+| `/api/v1/admin/students/{user_id}` | `PATCH`, `DELETE` | `require_admin` (`admin` ONLY) | **403 Forbidden** | **200 OK** | 401 Unauthorized |
 | `/api/v1/admin/summary` | `GET` | Public / Faculty Health Monitor | 200 OK | 200 OK | 200 OK |
 | `/api/v1/profile` | `POST` | `verify_clerk_token` | 201 Created | 201 Created | 401 Unauthorized |
 | `/api/v1/profile` | `GET` | `verify_clerk_token` | 200 OK | 200 OK | 401 Unauthorized |
@@ -455,4 +461,177 @@ The repository freezes production SQL aggregation functions executed via Postgre
 - **`public.get_subject_study_minutes(p_user_id UUID)`**: Aggregates total sessions, planned minutes, actual completed minutes, and mastery percentages grouped by subject.
 - **`public.get_weekly_performance_by_day(p_user_id UUID)`**: Computes scheduled hours, actual hours, and deficit hours grouped by `ISODOW` day index (1 = Monday to 7 = Sunday).
 - **`public.get_student_study_analytics(p_user_id UUID)`**: Composite RPC returning overview metrics, subject distributions, and weekly performance in a single atomic database round-trip.
+
+---
+
+### 8. Complete Admin CRUD Data Flow
+
+The Admin CRUD subsystem ([backend/routes/admin.py](file:///e:/FinalYear/backend/routes/admin.py)) manages curated learning resources and student records behind strict RBAC enforcement and Pydantic v2 schema validation ([backend/schemas/admin_and_leaderboard.py](file:///e:/FinalYear/backend/schemas/admin_and_leaderboard.py)).
+
+#### 8.1 End-to-End Request & Persistence Pipeline
+
+```mermaid
+flowchart TD
+    subgraph Client [Admin Console / API Caller]
+        REQ["HTTP Request (GET / POST / PATCH / DELETE)"]
+    end
+
+    subgraph AuthGate ["RBAC Security Gate (backend/auth.py)"]
+        JWT["verify_clerk_token (RS256 JWKS)"]
+        REQ --> JWT
+        JWT -->|Missing or Invalid Token| E401["HTTP 401 Unauthorized"]
+        JWT -->|Valid Token| ROLE["require_admin: check JWT claims or users.role"]
+        ROLE -->|role != 'admin' or DB error| E403["HTTP 403 Forbidden (Zero DB Ops)"]
+    end
+
+    subgraph Validation ["Pydantic v2 Schema Layer (admin_and_leaderboard.py)"]
+        ROLE -->|role == 'admin'| RES_VAL["AdminCreateResource / AdminUpdateResource"]
+        ROLE -->|role == 'admin'| STU_VAL["AdminCreateStudent / AdminUpdateStudent"]
+        RES_VAL -->|Invalid URL / Empty PATCH / Bounds| E422["HTTP 422 Unprocessable Entity"]
+        STU_VAL -->|Invalid Email / Semester / Empty PATCH| E422
+    end
+
+    subgraph Persistence ["Supabase Database Operations (routes/admin.py)"]
+        RES_VAL --> LR[("learning_resources table")]
+        STU_VAL --> USR[("users table")]
+        USR -->|user_id FK| PROF[("student_profiles table")]
+        LR --> RESP_R["AdminResourceResponse / List / Delete"]
+        PROF --> RESP_S["AdminStudentMutationResponse / List / Delete"]
+    end
+```
+
+#### 8.2 Resource Management Data Flow
+
+| Operation | Route | Request Schema | Validation & Normalization Invariants | Persistence Target |
+| :--- | :--- | :--- | :--- | :--- |
+| **List** | `GET /api/v1/admin/resources` | Query: `page`, `page_size`, `subject` | `page >= 1`, `1 <= page_size <= 100`; returns `AdminResourceListResponse` | `learning_resources` (`ORDER BY created_at DESC`) |
+| **Create** | `POST /api/v1/admin/resources` | `AdminCreateResource` | Validates `http://`/`https://` URL, normalizes `difficulty_level`, deduplicates `skills`, rounds `rating` (`0.0–5.0`), stamps `created_by` | `learning_resources` (`INSERT`) |
+| **Update** | `PATCH /api/v1/admin/resources/{resource_id}` | `AdminUpdateResource` | Rejects empty payloads via `model_fields_set`; applies partial updates + `updated_at`; returns `404` if missing | `learning_resources` (`UPDATE ... WHERE id = resource_id`) |
+| **Delete** | `DELETE /api/v1/admin/resources/{resource_id}` | — | Returns `AdminResourceDeleteResponse` or `404` if missing | `learning_resources` (`DELETE ... WHERE id = resource_id`) |
+
+#### 8.3 Student Management Data Flow
+
+1. **Provisioning (`POST /api/v1/admin/students`)**:
+   - Validates `AdminCreateStudent` (`clerk_id`, `email`, `semester` in `1..8`, `study_hours_per_day` in `0.5..16.0`, non-empty deduplicated `goals`, `subjects`).
+   - Inserts the core identity record into `users`, then upserts academic configuration into `student_profiles` (`on_conflict="user_id"`).
+   - Returns `AdminStudentMutationResponse` (`201 Created`).
+2. **Partial Update (`PATCH /api/v1/admin/students/{user_id}`)**:
+   - Validates `AdminUpdateStudent` (requires at least one modified field via `model_fields_set`).
+   - Separates account-level fields (`email`, `role`) targeting `users` from academic profile fields (`semester`, `study_hours_per_day`, `goals`, `subjects`, `onboarding_completed`) targeting `student_profiles`.
+   - Returns `AdminStudentMutationResponse` (`200 OK`) or `404 Not Found` if `user_id` does not exist.
+3. **Listing & Removal (`GET /api/v1/admin/students`, `DELETE /api/v1/admin/students/{user_id}`)**:
+   - Paginates `users` merged with `student_profiles` into `AdminStudentListResponse`.
+   - Deletes from `users` (cascading to `student_profiles`, `study_plans`, and `tasks` per [schema.sql](file:///e:/FinalYear/backend/schema.sql)) and returns `AdminDeleteStudentResponse`.
+
+---
+
+### 9. Leaderboard Scoring Mechanism & Privacy-Preserving Ranking
+
+The Leaderboard response contract is formalized in [backend/schemas/admin_and_leaderboard.py](file:///e:/FinalYear/backend/schemas/admin_and_leaderboard.py) (`LeaderboardBadge`, `LeaderboardEntry`, `LeaderboardUserStanding`, `LeaderboardResponse`), defining how student study execution telemetry is scored, ranked, and safely projected without exposing PII.
+
+#### 9.1 Scoring & Ranking Pipeline
+
+```mermaid
+flowchart LR
+    subgraph Telemetry ["Raw Execution Telemetry"]
+        T1[("tasks table: logged_hours & completed_tasks")]
+        T2[("study_plans table: scheduled_hours")]
+        T3[("student_profiles: semester & primary_focus")]
+    end
+
+    subgraph Engine ["Deterministic Scoring Engine"]
+        T1 --> WIN["Timeframe Window Filter (weekly / monthly / semester / all_time)"]
+        T2 --> WIN
+        T3 --> WIN
+        WIN --> XP["XP Calculation: BaseXP + AdherenceBonus + StreakBonus"]
+        XP --> BDG["Badge Evaluator (bronze / silver / gold / platinum)"]
+        BDG --> SORT["Deterministic Sort & Tie-Breaker"]
+    end
+
+    subgraph Projection ["Privacy & Schema Contract"]
+        SORT --> PII["Strip email & clerk_id; project student_id & display_name"]
+        PII --> VAL["LeaderboardResponse.validate_ranking_integrity"]
+        VAL --> OUT["JSON Payload + LeaderboardUserStanding"]
+    end
+```
+
+#### 9.2 Mathematical Scoring Formulation
+
+For each student $u$ evaluated within timeframe $W \in \{\text{weekly}, \text{monthly}, \text{semester}, \text{all\_time}\}$:
+
+1. **Base Study XP**: Rewards verified completed hours and completed study tasks:
+   $$\text{BaseXP}(u) = \text{round}\big(\text{LoggedHours}_W(u) \times 30\big) + \big(\text{CompletedTasks}_W(u) \times 15\big)$$
+
+2. **Adherence Tier Bonus**: Computed from timeframe adherence rate $A_W(u) = \min\big(100, \text{round}(\frac{\text{LoggedHours}_W(u)}{\max(0.1, \text{ScheduledHours}_W(u))} \times 100)\big)$:
+   $$\text{AdherenceBonus}(u) = \begin{cases}
+   150, & \text{if } A_W(u) \ge 90\% \\
+   75, & \text{if } 75\% \le A_W(u) < 90\% \\
+   0, & \text{otherwise}
+   \end{cases}$$
+
+3. **Consistency Streak Bonus**: Rewards consecutive days $S(u) \ge 0$ meeting daily study targets (capped at 30 days per cycle):
+   $$\text{StreakBonus}(u) = \min\big(S(u), \; 30\big) \times 10$$
+
+4. **Total Cohort Score**:
+   $$\text{XPScore}(u) = \text{BaseXP}(u) + \text{AdherenceBonus}(u) + \text{StreakBonus}(u)$$
+
+#### 9.3 Ranking, Tie-Breaking & Standing Calculations
+
+- **Supported Sort Metrics (`sorted_by`)**: `xp_score` (default), `adherence_rate`, `logged_hours`, `streak_days`.
+- **Deterministic Tie-Breaking Tuple** (descending):
+  $$\text{SortKey}(u) = \big(\text{PrimaryMetric}(u), \; A_W(u), \; \text{LoggedHours}_W(u), \; \text{CompletedTasks}_W(u)\big)$$
+- **User Standing Metrics (`LeaderboardUserStanding`)**:
+  - **Percentile** across $N = \text{total\_participants}$:
+    $$\text{Percentile}(u) = \text{round}\left(\frac{N - \text{rank}(u)}{N} \times 100, \; 1\right)$$
+  - **Points to Next Rank**:
+    $$\text{PointsToNextRank}(u) = \begin{cases}
+    0, & \text{if } \text{rank}(u) = 1 \\
+    \max\Big(0, \; \text{XPScore}\big(\text{rank}(u) - 1\big) - \text{XPScore}(u) + 1\Big), & \text{otherwise}
+    \end{cases}$$
+
+#### 9.4 Privacy & Integrity Invariants
+
+1. **Zero Peer PII Leakage**: `LeaderboardEntry` intentionally omits `email` and `clerk_id`, exposing only an anonymized `student_id` and `display_name`.
+2. **Ranking Monotonicity (`LeaderboardResponse.validate_ranking_integrity`)**:
+   - Enforces `total_participants >= len(entries)`.
+   - Enforces non-decreasing ranks across `entries` (`entries[i].rank >= entries[i - 1].rank`, with `rank >= 1`).
+3. **Sample Validated Response Payload**:
+   ```json
+   {
+     "success": true,
+     "timeframe": "weekly",
+     "sorted_by": "xp_score",
+     "semester_filter": 5,
+     "subject_filter": null,
+     "total_participants": 42,
+     "generated_at": "2026-11-12T06:30:00Z",
+     "current_user_standing": {
+       "rank": 1,
+       "percentile": 97.6,
+       "xp_score": 1480,
+       "points_to_next_rank": 0
+     },
+     "entries": [
+       {
+         "rank": 1,
+         "student_id": "stu-uuid-1",
+         "display_name": "Himanshu J.",
+         "semester": 5,
+         "primary_focus": "Operating Systems",
+         "xp_score": 1480,
+         "logged_hours": 35.0,
+         "scheduled_hours": 35.0,
+         "adherence_rate": 100,
+         "completed_tasks": 14,
+         "streak_days": 7,
+         "rank_delta": 1,
+         "badges": [
+           { "badge_id": "streak_7", "label": "7-Day Streak", "tier": "gold" }
+         ],
+         "is_current_user": true
+       }
+     ]
+   }
+   ```
+
 
