@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 Admin CRUD API Routes (Resources & Student Management).
 
@@ -9,13 +8,19 @@ unauthenticated callers.
 
 from datetime import datetime, timezone
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from auth import require_admin
+from auth import require_admin, verify_clerk_token
 from database import get_db
+from routes.notifications import admin_broadcast_notification, get_admin_recent_broadcasts
+from schemas.admin import (
+    StudentStatusUpdateRequest,
+    SubjectCreateRequest,
+    SubjectUpdateRequest,
+)
 from schemas.admin_and_leaderboard import (
     AdminCreateResource,
     AdminCreateStudent,
@@ -28,34 +33,25 @@ from schemas.admin_and_leaderboard import (
     AdminStudentRecord,
     AdminUpdateResource,
     AdminUpdateStudent,
-=======
-from datetime import datetime, timezone
-import logging
-from typing import Any, Dict, List, Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-
-from auth import require_admin, verify_clerk_token
-from database import get_db
-from routes.notifications import admin_broadcast_notification, get_admin_recent_broadcasts
-from schemas.admin import (
-    StudentStatusUpdateRequest,
-    SubjectCreateRequest,
-    SubjectUpdateRequest,
 )
 from schemas.notifications import (
     AdminBroadcastNotificationRequest,
     AdminBroadcastNotificationResponse,
->>>>>>> origin/main
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/admin",
-<<<<<<< HEAD
-    tags=["Admin"],
+    tags=["Admin Management"],
     dependencies=[Depends(require_admin)],
+)
+
+admin_management_router = router
+
+subjects_public_router = APIRouter(
+    prefix="/api/v1/subjects",
+    tags=["Curriculum Subjects"],
 )
 
 
@@ -443,15 +439,6 @@ async def delete_admin_student(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete student",
         ) from exc
-
-=======
-    tags=["Admin Management"],
-)
-
-subjects_public_router = APIRouter(
-    prefix="/api/v1/subjects",
-    tags=["Curriculum Subjects"],
-)
 
 
 # ===========================================================================
@@ -923,4 +910,3 @@ async def trigger_leaderboard_refresh(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to execute leaderboard evaluation",
         ) from exc
->>>>>>> origin/main

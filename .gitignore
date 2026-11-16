@@ -31,6 +31,8 @@ skills-lock.json
 
 # Python virtual environment
 venv/
+env/
+backend/env/
 recommendation/venv/
 
 # Jupyter
