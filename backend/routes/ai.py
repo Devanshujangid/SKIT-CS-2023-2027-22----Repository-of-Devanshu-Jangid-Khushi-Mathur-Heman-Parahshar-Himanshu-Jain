@@ -840,18 +840,6 @@ async def ai_chat(
             payload.stream,
         )
 
-        # Real-time streaming response (SSE)
-        if payload.stream:
-            return StreamingResponse(
-                stream_chat_response(message=message, clerk_id=clerk_id),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
-
         # ------------------------------------------------------------------
         # Academic Syllabus & Context-Window Guardrail Check
         # ------------------------------------------------------------------
@@ -868,6 +856,27 @@ async def ai_chat(
                 message,
                 guardrail_result.refusal_reason,
             )
+            if payload.stream:
+                async def refusal_stream():
+                    refusal_payload = {
+                        "type": "refusal",
+                        "is_refused": True,
+                        "refusal_reason": guardrail_result.refusal_reason,
+                        "refusal_message": guardrail_result.refusal_message,
+                        "suggested_academic_topics": guardrail_result.suggested_academic_topics,
+                    }
+                    yield f"data: {json.dumps(refusal_payload)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(
+                    refusal_stream(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
             return {
                 "success": False,
                 "is_refused": True,
@@ -877,6 +886,23 @@ async def ai_chat(
                 "recommendations": [],
                 "recommendation_count": 0,
             }
+
+        # Real-time streaming response (SSE)
+        if payload.stream:
+            return StreamingResponse(
+                stream_chat_response(
+                    message=message,
+                    clerk_id=clerk_id,
+                    goal_context=payload.goal_context,
+                    rank_context=payload.rank_context,
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
                 # Fetch verified student personalization context.
         student_context = await run_in_threadpool(
             get_student_context,

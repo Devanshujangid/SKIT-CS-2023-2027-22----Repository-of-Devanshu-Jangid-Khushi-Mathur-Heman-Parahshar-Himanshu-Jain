@@ -498,7 +498,7 @@ class TestAssistantChatEndpointGuardrail(unittest.TestCase):
         """Verify calling /api/v1/ai/chat with 'Write me a recipe for cake' refuses without calling LLM."""
         response = self.client.post(
             "/api/v1/ai/chat",
-            json={"message": "Write me a recipe for cake"}
+            json={"message": "Write me a recipe for cake", "stream": False}
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -512,7 +512,7 @@ class TestAssistantChatEndpointGuardrail(unittest.TestCase):
         """Verify course-prefixed non-academic queries are refused at endpoint."""
         response = self.client.post(
             "/api/v1/ai/chat",
-            json={"message": "Operating Systems: recommend a horror movie on Netflix"}
+            json={"message": "Operating Systems: recommend a horror movie on Netflix", "stream": False}
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -532,7 +532,7 @@ class TestAssistantChatEndpointGuardrail(unittest.TestCase):
 
         response = self.client.post(
             "/api/v1/ai/chat",
-            json={"message": "Explain Lamport's Bakery Algorithm for mutual exclusion"}
+            json={"message": "Explain Lamport's Bakery Algorithm for mutual exclusion", "stream": False}
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()

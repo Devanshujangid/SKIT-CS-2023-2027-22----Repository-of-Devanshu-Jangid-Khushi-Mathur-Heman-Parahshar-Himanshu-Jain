@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 from starlette.concurrency import run_in_threadpool
 from services.student_context import get_student_context
-from services.assistant_guardrail import check_academic_scope
+from services.assistant_guardrail import check_academic_scope, check_context_window_safety
 from services.recommendation_service import recommendation_service
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,8 @@ async def stream_chat_response(
     clerk_id: str,
     gemini_client: Optional[genai.Client] = None,
     target_model: Optional[str] = None,
+    goal_context: Optional[dict] = None,
+    rank_context: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Asynchronous generator streaming Server-Sent Events (SSE) for the chat assistant.
@@ -59,7 +61,11 @@ async def stream_chat_response(
     logger.info("Initiating streaming chat session for student: %s", clerk_id)
 
     # 1. Guardrail validation
-    guardrail_result = check_academic_scope(query=message)
+    guardrail_result = check_context_window_safety(
+        query=message,
+        goal_context=goal_context,
+        rank_context=rank_context,
+    )
     if not guardrail_result.is_academic:
         logger.info(
             "Non-academic query refused for user %s: %s (reason: %s)",

@@ -312,7 +312,7 @@ class TestAssistantPromptInjection(unittest.TestCase):
 
         for p in injection_payloads:
             with self.subTest(payload=p):
-                response = client.post("/api/v1/ai/chat", json={"message": p})
+                response = client.post("/api/v1/ai/chat", json={"message": p, "stream": False})
                 self.assertEqual(response.status_code, 200)
                 data = response.json()
                 self.assertFalse(data.get("success"))
